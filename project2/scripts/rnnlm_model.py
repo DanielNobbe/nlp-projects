@@ -20,10 +20,10 @@ class RNNLM(nn.Module):
     """Container module for RNN Language Model. Consists of an encoder,
     a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type = 'GRU', ntoken, ninp, nhid, nlayers, dropout = 0.2,
+    def __init__(self, ntoken, ninp, nhid, nlayers, rnn_type = 'GRU', dropout = 0.2,
     tie_weights = False):
 
-        super(RNNLM, self).__init__():
+        super(RNNLM, self).__init__()
         self.ntoken = ntoken
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
