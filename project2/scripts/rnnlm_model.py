@@ -3,18 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Set the random seed manually for reproducibility.
-torch.manual_seed(2020)
-
-# Check if GPU available
-is_gpu_available = torch.cuda.is_available()
-
-if is_gpu_available:
-    device = torch.device("cuda")
-    print('GPU is available.')
-else:
-    device = torch.device('cpu')
-    print("GPU not available, CPU used instead.")
+# The following code is based on Pytorch's example of an RNNModel for LM:
+# https://github.com/pytorch/examples/blob/master/word_language_model/model.py
 
 class RNNLM(nn.Module):
     """Container module for RNN Language Model. Consists of an encoder,
