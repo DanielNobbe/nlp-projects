@@ -24,7 +24,7 @@ class Encoder(nn.Module):
         )
 
         self.rnn = nn.GRU(**gru_args)
-        num_directions = 2 # bidiractional
+        num_directions = 2  # bidiractional
         self.h2m = nn.Linear(hidden_size * num_layers * num_directions, latent_size)
         self.h2v = nn.Linear(hidden_size * num_layers * num_directions, latent_size)
 
@@ -63,13 +63,19 @@ class Decoder(nn.Module):
             bidirectional=False,
         )
 
-        self.l2h = nn.Linear(latent_size, hidden_size)
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+
+        self.l2h = nn.Linear(latent_size, num_layers * hidden_size)
         self.rnn = nn.GRU(**gru_args)
 
     def forward(self, z, input):
         h = self.l2h(z)
+        batch_size = h.size(0)
+        h = h.reshape(batch_size, self.num_layers, self.hidden_size)
+        h = h.transpose(0, 1)
 
-        __import__('pdb').set_trace()
+        __import__("pdb").set_trace()
         output, hn = self.rnn(input, h)
 
         return output
@@ -100,7 +106,7 @@ class SentenceVAE(nn.Module):
         packed = pack_padded_sequence(
             embedded, lengths, batch_first=True, enforce_sorted=False
         )
-        __import__('pdb').set_trace()
+        __import__("pdb").set_trace()
         mean, std = self.encoder(packed)
         z = self.sampler(mean, std, batch_size)
         decoded = self.decoder(z, packed)
