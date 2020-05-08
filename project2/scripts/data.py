@@ -27,11 +27,13 @@ class SentenceDataset(Dataset):
 def padded_collate(batch, pad_idx=0):
     """Pad sentences, return sentences and labels as LongTensors."""
     sentences, targets = zip(*batch)
-    max_length = max([len(s) for s in sentences])
+    lengths = [len(s) for s in sentences]
+    max_length = max(lengths)
     # Pad each sentence with zeros to max_length
     padded_sentences = [s + [pad_idx] * (max_length - len(s)) for s in sentences]
     padded_targets = [s + [pad_idx] * (max_length - len(s)) for s in targets]
-    return torch.LongTensor(padded_sentences), torch.LongTensor(padded_targets)
+
+    return torch.LongTensor(padded_sentences), torch.LongTensor(padded_targets), lengths
 
 
 def get_datasets(data_path="../Data/Dataset"):
@@ -54,7 +56,7 @@ def get_datasets(data_path="../Data/Dataset"):
     val_sentences = preprocess_lines(val_text)
     test_sentences = preprocess_lines(test_text)
 
-    tokenizer = WordTokenizer(train_text)
+    tokenizer = WordTokenizer(train_sentences)
 
     train_data = SentenceDataset(train_sentences, tokenizer)
     val_data = SentenceDataset(val_sentences, tokenizer)
