@@ -1,15 +1,16 @@
 import os
+from itertools import islice
 from pathlib import Path
 import pickle
 
 import numpy as np
 import torch
-import torch.utils.data as data
+from torch.utils.data import Dataset, DataLoader
 
 from tokenizers import WordTokenizer
 
 
-class SentenceDataset(data.Dataset):
+class SentenceDataset(Dataset):
     def __init__(self, sentences, tokenizer):
         self.sentences = sentences
         self.tokenizer = tokenizer
@@ -74,5 +75,20 @@ def get_datasets(data_path="../Data/Dataset"):
     return train_data, val_data, test_data
 
 
+def padded_collate(batch, pad_idx=0):
+    """Pad sentences, return sentences and labels as LongTensors."""
+    sentences, targets = zip(*batch)
+    max_length  = max([len(s) for s in sentences])
+    # Pad each sentence with zeros to max_length
+    padded_sentences = [s + [pad_idx] * (max_length - len(s)) for s in sentences]
+    padded_targets = [s + [pad_idx] * (max_length - len(s)) for s in targets]
+    return torch.LongTensor(padded_sentences), torch.LongTensor(padded_targets)
+
+
 if __name__ == "__main__":
     train_data, val_data, test_data = get_datasets("../Data/Dataset")
+    train_loader = DataLoader(train_data, batch_size=64, shuffle=True, collate_fn=padded_collate)
+    val_loader = DataLoader(train_data, batch_size=256, shuffle=False, collate_fn=padded_collate)
+
+    for a in islice(train_loader, 10):
+        print(a)
