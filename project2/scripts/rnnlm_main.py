@@ -19,6 +19,7 @@ import torch.onnx
 import pickle
 
 from rnnlm_model import RNNLM
+#import rnnlm_model
 from Preprocessing_RNN import SentenceDataset
 
 
@@ -28,14 +29,15 @@ def main(args):
     torch.manual_seed(args.seed)
 
     # Use GPU is possible
-    if args.cuda:
-        # Check if GPU available
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-            print('GPU is available.')
-        else:
-            device = torch.device('cpu')
-            print("GPU not available, CPU used instead.")
+    # if args.cuda:
+    # Check if GPU available
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        print('GPU is available.')
+    else:
+        device = torch.device('cpu')
+        print(type(device))
+        print("GPU not available, CPU used instead.")
 
     # Load data
 
@@ -50,14 +52,58 @@ def main(args):
     with open(pickle_path, 'rb') as file:
         dataset = pickle.load(file)
     data_loader = data.DataLoader(dataset, args.batch_size, num_workers = 1)
+    train_data = data.DataLoader(dataset._train_data,
+                                args.batch_size, num_workers = 1)
 
     # print a couple of sequences to see if it works.
     for sequence in data_loader:
         print(sequence)
+        print(type(sequence))
         print(sequence.size())
         break
 
-    print(len(dataset._tokens))
+    print('Hier')
+    print(dataset._train_data)
+
+
+
+    # Build RNN LM Model
+    ntokens = dataset.vocab_size
+    print(ntokens)
+    model = RNNLM(ntoken = ntokens, ninp = args.emsize, nhid = args.nhid,
+                    nlayers = args.nlayers, dropout = args.dropout).to(device)
+
+    # use negative log-likelihood as loss / objective
+    criterion = nn.NLLLoss()
+
+    # Prerequisites for training
+
+    def repackage_hidden(h):
+        """Wraps hidden states in new tensors, to detatch them from history"""
+
+        if isinstance(h, torch.Tensor):
+            return h.detach()
+        else:
+            return tuple(repackage_hidden(v) for v in h)
+
+
+    def train():
+
+        # set model to training mode, enabling dropout
+        model.train()
+
+        total_loss = 0.
+        start_time = time.time()
+
+        ntokens = dataset.vocab_size
+
+        # initialize hidden layers
+        hidden = model.init_hidden(args.batch_size)
+
+        # for batch, i in enumerate(range(0, data_loader.__len__() - 1, args.bptt)):
+
+
+
 
 
 
