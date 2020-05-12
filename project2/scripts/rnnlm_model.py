@@ -18,15 +18,19 @@ class RNNLM(nn.Module):
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
 
-        if rnn_type in ['LSTM', 'GRU']:
-            self.rnn = getattr(nn, rnn_type)(ninp, nhid, nlayers, dropout = dropout)
-        else:
-            try:
-                nonlinearity = {'RNN_TANH' : 'tanh', 'RNN_RELU' : 'relu'}[rnn_type]
-            except KeyError:
-                raise ValueError("""An invalid option for `--model` was supplied.
-                                    Options are ['LSTM', 'GRU', 'RNN_TANH' or 'RNN_RELU']""")
-            self.rnn = nn.RNN(ninp, nhid, nlayers, nonlinearity = nonlinearity, dropout = dropout)
+        self.rnn = nn.GRU(input_size = ninp, hidden_size = nhid,
+                            num_layers = nlayers, bias = True, batch_first = True,
+                            dropout = dropout, bidirectional = False)
+
+        # if rnn_type in ['LSTM', 'GRU']:
+        #     self.rnn = getattr(nn, rnn_type)(ninp, nhid, nlayers, dropout = dropout)
+        # else:
+        #     try:
+        #         nonlinearity = {'RNN_TANH' : 'tanh', 'RNN_RELU' : 'relu'}[rnn_type]
+        #     except KeyError:
+        #         raise ValueError("""An invalid option for `--model` was supplied.
+        #                             Options are ['LSTM', 'GRU', 'RNN_TANH' or 'RNN_RELU']""")
+        #     self.rnn = nn.RNN(ninp, nhid, nlayers, nonlinearity = nonlinearity, dropout = dropout, batch_first = False)
         self.decoder = nn.Linear(nhid, ntoken)
 
         # Optionally tie weights as in:
@@ -39,10 +43,6 @@ class RNNLM(nn.Module):
             if nhid != ninp:
                 raise ValueError('When using the tied flag, nhid must be equal to emsize')
             self.decoder.weight = self.encoder.weight
-
-        self.rnn_type = rnn_type
-        self.nhid = nhid
-        self.nlayers = nlayers
 
         # Call weight initialization function
         self.init_weights()
@@ -59,12 +59,18 @@ class RNNLM(nn.Module):
 
     def forward(self, input, hidden):
         embedding = self.drop(self.encoder(input))
+        print('Embedding / Input')
+        print(embedding.size())
         output, hidden = self.rnn(embedding, hidden)
         output = self.drop(output)
         decoded = self.decoder(output)
-        decoded = decoded.view(-1, self.ntoken)
+        print('Decoded pre-view')
+        print(decoded.size())
+        decoded = decoded.view(-1, self.ntoken) # TODO: either view(-1, seq_len, self.ntoken) or no resize
+        print('Decoded post-view')
+        print(decoded.size())
 
-        return F.softmax(decoded, dim = 1), hidden
+        return F.softmax(decoded, dim = 1), hidden #TODO: use linear output and cross_entropy, or log_softmax and NLLLoss()
 
     def init_hidden(self, bsz):
         weight = next(self.parameters())

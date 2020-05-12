@@ -14,13 +14,15 @@ import os
 import torch
 import torch.cuda
 import torch.nn as nn
-import torch.utils.data as data
+from torch.utils.data import DataLoader
 import torch.onnx
 import pickle
 
 from rnnlm_model import RNNLM
 #import rnnlm_model
-from Preprocessing_RNN import SentenceDataset
+#from Preprocessing_RNN import SentenceDataset
+
+from data import padded_collate, get_datasets
 
 
 def main(args):
@@ -36,43 +38,39 @@ def main(args):
         print('GPU is available.')
     else:
         device = torch.device('cpu')
-        print(type(device))
         print("GPU not available, CPU used instead.")
 
     # Load data
 
-    # Get path of current directory
-    file_path = os.path.dirname(os.path.abspath(__file__))
-
-    # Find data path relative to current directory
-    relative_pickle_path = '/../Data/Dataset/Dataloader.pkl'
-    pickle_path = file_path + relative_pickle_path
-
-    # Open and unpickle Dataloader.pkl
-    with open(pickle_path, 'rb') as file:
-        dataset = pickle.load(file)
-    data_loader = data.DataLoader(dataset, args.batch_size, num_workers = 1)
-    train_data = data.DataLoader(dataset._train_data,
-                                args.batch_size, num_workers = 1)
-
-    # print a couple of sequences to see if it works.
-    for sequence in data_loader:
-        print(sequence)
-        print(type(sequence))
-        print(sequence.size())
-        break
-
-    print('Hier')
-    print(dataset._train_data)
+    # # Get path of current directory
+    # file_path = os.path.dirname(os.path.abspath(__file__))
+    #
+    # # Find data path relative to current directory
+    # relative_pickle_path = '/../Data/Dataset/Dataloader.pkl'
+    # pickle_path = file_path + relative_pickle_path
+    #
+    # # Open and unpickle Dataloader.pkl
+    # with open(pickle_path, 'rb') as file:
+    #     dataset = pickle.load(file)
+    # data_loader = data.DataLoader(dataset, args.batch_size, num_workers = 1)
+    # train_data = data.DataLoader(dataset._train_data,
+    #                             args.batch_size, num_workers = 1)
+    #
+    # # print a couple of sequences to see if it works.
+    # for sequence in data_loader:
+    #     print(sequence)
+    #     print(type(sequence))
+    #     print(sequence.size())
+    #     break
 
 
 
     # Build RNN LM Model
-    ntokens = dataset.vocab_size
-    print(ntokens)
-    model = RNNLM(ntoken = ntokens, ninp = args.emsize, nhid = args.nhid,
-                    nlayers = args.nlayers, dropout = args.dropout).to(device)
-
+    #ntokens = dataset.vocab_size
+    # print(ntokens)
+    # model = RNNLM(ntoken = ntokens, ninp = args.emsize, nhid = args.nhid,
+    #                 nlayers = args.nlayers, dropout = args.dropout).to(device)
+    #
     # use negative log-likelihood as loss / objective
     criterion = nn.NLLLoss()
 
@@ -89,18 +87,58 @@ def main(args):
 
     def train():
 
-        # set model to training mode, enabling dropout
+        train_data, val_data, test_data = get_datasets()
+
+        # Build model
+        vocab_size = train_data.tokenizer.vocab_size
+        model = RNNLM(ntoken = vocab_size, ninp = args.emsize, nhid = args.nhid,
+                        nlayers = args.nlayers, dropout = args.dropout).to(device)
+
+        train_loader = DataLoader(
+            train_data, batch_size = args.batch_size, shuffle = True, #TODO change back to True
+            collate_fn = padded_collate, num_workers = 1
+        )
+
+        # Turn on training mode to enable dropout
         model.train()
+        # total_loss = 0.
+        # start_time = time.time()
 
-        total_loss = 0.
-        start_time = time.time()
-
-        ntokens = dataset.vocab_size
-
-        # initialize hidden layers
+        # initialize hidden variables of RNN
         hidden = model.init_hidden(args.batch_size)
 
-        # for batch, i in enumerate(range(0, data_loader.__len__() - 1, args.bptt)):
+        #for input_sentences_batch, target_sentences_batch, lengths in train_loader:
+        for i, (input_sentences_batch, target_sentences_batch, lengths) in enumerate(train_loader, 1):
+
+            print('Input sentences batch')
+            print(input_sentences_batch.size())
+            print('Target sentences batch')
+            print(target_sentences_batch.size())
+            print('lenghts')
+            print(lengths)
+
+            model.zero_grad()
+
+            hidden = repackage_hidden(hidden)
+
+            output, hidden = model(input_sentences_batch, hidden)
+
+            print('Output')
+            print(output.size())
+            print('Hidden')
+            print(hidden.size())
+
+            loss = criterion(output, target_sentences_batch)
+
+            loss.backward()
+
+            break
+
+
+
+
+    train()
+
 
 
 
