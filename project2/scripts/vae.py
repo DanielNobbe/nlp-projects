@@ -7,7 +7,10 @@ from torch.distributions.normal import Normal
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-from data import padded_collate
+from torch.optim import Adam
+from torch.nn.functional import cross_entropy
+
+from data import padded_collate, get_datasets
 
 
 class Encoder(nn.Module):
@@ -75,7 +78,6 @@ class Decoder(nn.Module):
         h = h.reshape(batch_size, self.num_layers, self.hidden_size)
         h = h.transpose(0, 1)
 
-        __import__("pdb").set_trace()
         output, hn = self.rnn(input, h)
 
         return output
@@ -106,45 +108,83 @@ class SentenceVAE(nn.Module):
         packed = pack_padded_sequence(
             embedded, lengths, batch_first=True, enforce_sorted=False
         )
-        __import__("pdb").set_trace()
+
         mean, std = self.encoder(packed)
         z = self.sampler(mean, std, batch_size)
         decoded = self.decoder(z, packed)
         unpacked, lengths = pad_packed_sequence(decoded, batch_first=True)
 
         out = self.decoded2vocab(unpacked)
-        return out
+        return out, mean, std
 
 
-def train():
-    from data import get_datasets
+def train_one_epoch(model, optimizer, data_loader, device):
+    prior = Normal(0.0, 1.0)
+    model.train()
+    for bx, by, bl in data_loader:
+        logp, mean, std = model(bx.to(device), bl)
+
+        b, l, c = logp.shape
+        pred = logp.view(b * l, c)
+        target = by.view(b * l)
+
+        nll = cross_entropy(pred, target, ignore_index=0, reduction="sum") / b
+
+        q = Normal(mean, std)
+        kl = torch.sum(kl_divergence(prior, q))
+
+        loss = nll + kl
+
+        print(nll, kl)
+        print(loss)
+        print("loss {:.3f} accuracy {:.3f}".format(epoch + 1, valid_loss, valid_acc))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+
+
+def train(
+    epochs,
+    num_layers=2,
+    embedding_size=256,
+    hidden_size=128,
+    latent_size=32,
+    batch_size_train=64,
+    batch_size_valid=256,
+    learning_rate=0.001,
+    device=torch.device("cpu"),
+):
 
     train_data, val_data, test_data = get_datasets()
     vocab_size = train_data.tokenizer.vocab_size
+
     model = SentenceVAE(
         vocab_size=vocab_size,
-        embedding_size=256,
-        hidden_size=128,
-        latent_size=32,
-        num_layers=2,
+        embedding_size=embedding_size,
+        hidden_size=hidden_size,
+        latent_size=latent_size,
+        num_layers=num_layers,
     )
+    model.to(device)
 
     train_loader = DataLoader(
-        train_data, batch_size=64, shuffle=True, collate_fn=padded_collate
+        train_data, batch_size=batch_size_train, shuffle=True, collate_fn=padded_collate
     )
+
     val_loader = DataLoader(
-        train_data, batch_size=256, shuffle=False, collate_fn=padded_collate
+        val_data, batch_size=batch_size_valid, shuffle=False, collate_fn=padded_collate
     )
 
-    model.train()
-    for input_sentences_batch, target_sentences_batch, lengths in train_loader:
+    optimizer = Adam(model.parameters(), lr=learning_rate)
 
-        out = model(input_sentences_batch, lengths)
-
-        optimizer.zero_grad()
-        # loss.backward()
-        # optimizer.step()
+    for epoch in range(epochs):
+        train_one_epoch(model, optimizer, train_loader, device)
 
 
 if __name__ == "__main__":
-    train()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
+    epochs = 50
+    train(epochs, device=device)
