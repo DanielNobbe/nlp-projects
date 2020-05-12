@@ -44,12 +44,28 @@ class Encoder(nn.Module):
 class Sampler(nn.Module):
     def __init__(self, latent_size):
         super(Sampler, self).__init__()
-        self.latent_size = latent_size
+        self.latent_size = latent_size  # TODO not used
 
     def forward(self, mean, std, batch_size):
         m = Normal(mean, std)
         sample = m.rsample()
         return sample
+
+
+class WordDropout(nn.Module):
+    def __init__(self, dropout_probability, unk_token_idx):
+        super(WordDropout, self).__init__()
+        self.dropout_probability = dropout_probability
+        self.unk_token_idx = unk_token_idx
+
+    def forward(self, padded_sentences):
+        x = padded_sentences.clone()
+        dropout_mask = (
+            torch.rand_like(padded_sentences, dtype=torch.float32)
+            >= self.dropout_probability
+        )
+        x[dropout_mask] = self.unk_token_idx
+        return x
 
 
 class Decoder(nn.Module):
@@ -85,7 +101,14 @@ class Decoder(nn.Module):
 
 class SentenceVAE(nn.Module):
     def __init__(
-        self, vocab_size, embedding_size, hidden_size, latent_size, num_layers
+        self,
+        vocab_size,
+        embedding_size,
+        hidden_size,
+        latent_size,
+        num_layers,
+        unk_token_idx,
+        word_dropout_probability=0.0,
     ):
         super(SentenceVAE, self).__init__()
         self.embedding = nn.Embedding(
@@ -96,22 +119,35 @@ class SentenceVAE(nn.Module):
             embedding_size, hidden_size, latent_size, num_layers=num_layers
         )
         self.sampler = Sampler(latent_size)
+        self.word_dropout = WordDropout(word_dropout_probability, unk_token_idx)
         self.decoder = Decoder(
             embedding_size, hidden_size, latent_size, num_layers=num_layers
         )
-        self.decoded2vocab = nn.Linear(hidden_size, vocab_size)
+        self.decoded2vocab = nn.Linear(
+            hidden_size, vocab_size
+        )  # TODO should this be in the decoder
 
-    def forward(self, input, lengths):
-        batch_size = input.size(0)
+    def _embed_and_pack(self, input, lengths):
         embedded = self.embedding(input)
-        # TODO here should ignore those that are not actual input, since the sentence lengths are variable
         packed = pack_padded_sequence(
             embedded, lengths, batch_first=True, enforce_sorted=False
         )
+        return packed
+
+    def forward(self, input, lengths):
+        batch_size = input.size(0)
+
+        packed = self._embed_and_pack(input, lengths)
 
         mean, std = self.encoder(packed)
+
         z = self.sampler(mean, std, batch_size)
+
+        decoder_input = self.word_dropout(input)
+        packed = self._embed_and_pack(decoder_input, lengths)
+
         decoded = self.decoder(z, packed)
+
         unpacked, lengths = pad_packed_sequence(decoded, batch_first=True)
 
         out = self.decoded2vocab(unpacked)
@@ -125,24 +161,32 @@ def train_one_epoch(model, optimizer, data_loader, device):
         logp, mean, std = model(bx.to(device), bl)
 
         b, l, c = logp.shape
-        pred = logp.view(b * l, c)
-        target = by.view(b * l)
+        pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+        target = by  # target shape: (batch_size, seq_length)
 
-        nll = cross_entropy(pred, target, ignore_index=0, reduction="sum") / b
+        # TODO Is this fixed now? What kind of values are we supposed to get here?
+        # TODO ignore index is hardcoded here
+        nll = cross_entropy(pred, target, ignore_index=0, reduction="none")
+        nll = nll.sum(-1)
 
         q = Normal(mean, std)
-        kl = torch.sum(kl_divergence(prior, q))
+        kl = kl_divergence(q, prior)
+        kl = kl.sum(-1)
 
-        loss = nll + kl
+        # elbo = log-likelihood - D_kl
+        # max elbo <-> min -elbo
+        # -elbo = -log-likelihood + D_kl
+        loss = (nll + kl).mean()
 
-        print(nll, kl)
-        print(loss)
-        print("loss {:.3f} accuracy {:.3f}".format(epoch + 1, valid_loss, valid_acc))
+        print(
+            "nll mean: {} \t kl mean: {} \t loss: {}".format(
+                nll.mean().item(), kl.mean().item(), loss.item()
+            )
+        )
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
 
 
 def train(
@@ -155,6 +199,7 @@ def train(
     batch_size_valid=256,
     learning_rate=0.001,
     device=torch.device("cpu"),
+    word_dropout_probability=0.0,
 ):
 
     train_data, val_data, test_data = get_datasets()
@@ -166,6 +211,8 @@ def train(
         hidden_size=hidden_size,
         latent_size=latent_size,
         num_layers=num_layers,
+        word_dropout_probability=word_dropout_probability,
+        unk_token_idx=train_data.tokenizer.unk_token_id,
     )
     model.to(device)
 
@@ -186,5 +233,5 @@ def train(
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-    epochs = 50
-    train(epochs, device=device)
+    epochs = 4
+    train(epochs, device=device, word_dropout_probability=0.2)
