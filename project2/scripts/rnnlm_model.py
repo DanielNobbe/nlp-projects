@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 # The following code is based on Pytorch's example of an RNNModel for LM:
 # https://github.com/pytorch/examples/blob/master/word_language_model/model.py
@@ -57,20 +58,28 @@ class RNNLM(nn.Module):
         self.decoder.bias.data.zero_()
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, input, hidden):
+    def _embed_and_pack(self, input, lengths):
+        embedded = self.drop(self.encoder(input))
+        packed = pack_padded_sequence(embedded, lengths, batch_first = True,
+                                        enforce_sorted = False)
+        return packed
+
+    def forward(self, input, hidden, lengths):
+
         embedding = self.drop(self.encoder(input))
-        print('Embedding / Input')
-        print(embedding.size())
+        #packed = self._embed_and_pack(input, lengths)
+
         output, hidden = self.rnn(embedding, hidden)
+        # output, hidden = self.rnn(packed, hidden)
+
         output = self.drop(output)
         decoded = self.decoder(output)
-        print('Decoded pre-view')
-        print(decoded.size())
-        decoded = decoded.view(-1, self.ntoken) # TODO: either view(-1, seq_len, self.ntoken) or no resize
-        print('Decoded post-view')
-        print(decoded.size())
 
-        return F.softmax(decoded, dim = 1), hidden #TODO: use linear output and cross_entropy, or log_softmax and NLLLoss()
+        #unpacked, lengths = pad_packed_sequence(decoded, batch_first = True)
+        #decoded = decoded.view(-1, self.ntoken) # TODO: either view(-1, seq_len, self.ntoken) or no resize
+
+        #return F.log_softmax(decoded, dim = 1), hidden #TODO: use linear output and cross_entropy, or log_softmax and NLLLoss()
+        return decoded, hidden
 
     def init_hidden(self, bsz):
         weight = next(self.parameters())
