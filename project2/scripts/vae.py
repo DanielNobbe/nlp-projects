@@ -112,7 +112,10 @@ class SentenceVAE(nn.Module):
         num_layers,
         unk_token_idx,
         word_dropout_probability=0.0,
+<<<<<<< HEAD
         model_save_path='models',
+=======
+>>>>>>> First implementation of FreeBits. Reordered the final steps in loss calculation somewhat. Added clamping to freebits value, if this is specified
         freebits = None,
     ):
         super(SentenceVAE, self).__init__()
