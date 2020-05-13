@@ -162,7 +162,7 @@ def train_one_epoch(model, optimizer, data_loader, device):
 
         b, l, c = logp.shape
         pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
-        target = by  # target shape: (batch_size, seq_length)
+        target = by.to(device)  # target shape: (batch_size, seq_length)
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         # TODO ignore index is hardcoded here
