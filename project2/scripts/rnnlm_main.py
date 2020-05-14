@@ -112,23 +112,34 @@ def main(args):
             return tuple(repackage_hidden(v) for v in h)
 
 
-    def evaluate(data_loader):
+    def evaluate(data_loader, dataset):
 
         # Disable dropout by switching to evaluation mode
         model.eval()
 
         total_loss = 0.
 
-        vocab_size = train_data.tokenizer.vocab_size #TODO: again, shouldn't this be the entire corpus vocab size? And how do we find this?
+        # TODO: find more elegant solution for this last batch problem
+        # Adapt dimensions of hidden state to match last batch size if dataset size isnt multiple of batch size
+        adapt_last_batch = False
+        batch_mod_diff = len(dataset) % args.eval_batch_size
+        if batch_mod_diff != 0:
+            last_hidden = model.init_hidden((batch_mod_diff))
+            adapt_last_batch = True
 
         hidden = model.init_hidden(args.eval_batch_size)
 
         with torch.no_grad():
             for batch, (source_batch, target_batch, lengths) in enumerate(data_loader, 0):
 
-                output, hidden = model(source_batch, hidden, lengths)
+                if len(lengths) != args.eval_batch_size:
+                    hidden = last_hidden
 
                 hidden = repackage_hidden(hidden)
+
+                output, hidden = model(source_batch, hidden, lengths)
+
+                # hidden = repackage_hidden(hidden)
 
                 batches, seq_length, vocab_size = output.shape
 
@@ -148,6 +159,13 @@ def main(args):
         total_loss = 0.
         start_time = time.time()
 
+        # Adapt dimensions of hidden state to match last batch size if dataset size isnt multiple of batch size
+        adapt_last_batch = False
+        batch_mod_diff = len(train_data) % args.batch_size
+        if batch_mod_diff != 0:
+            last_hidden = model.init_hidden((batch_mod_diff))
+            adapt_last_batch = True
+
         # initialize hidden variables of RNN
         hidden = model.init_hidden(args.batch_size)
 
@@ -155,6 +173,9 @@ def main(args):
         for batch, (input_sentences_batch, target_sentences_batch, lengths) in enumerate(train_loader, 0):
 
             model.zero_grad()
+
+            if len(lengths) != args.batch_size:
+                hidden = last_hidden
 
             hidden = repackage_hidden(hidden)
 
@@ -191,9 +212,12 @@ def main(args):
                 total_loss = 0
                 start_time = time.time()
 
-            # To speed things up during debugging. TODO: remove
-            if batch == 40:
+                # TODO: remove before tuning
                 break
+
+            # To speed things up during debugging. TODO: remove
+            # if batch == 40:
+            #     break
 
 
 
@@ -216,7 +240,7 @@ def main(args):
 
             train()
 
-            val_loss = evaluate(val_loader)
+            val_loss = evaluate(val_loader, val_data)
 
             print('-' * 89)
 
@@ -249,7 +273,7 @@ def main(args):
 
 
     # Evaluate best model on test data
-    test_loss = evaluate(test_loader)
+    test_loss = evaluate(test_loader, test_data)
 
     print('=' * 89)
     print('|End of training and testing. | Test loss {:5.2f}'.format(test_loss))
@@ -284,9 +308,9 @@ if __name__ == "__main__":
                         help = 'gradient clipping.') #TODO: Find out what gradient clipping is. --> Helps prevent exploding gradient problem for RNNs
     parser.add_argument('--epochs', type = int, default = 5,
                         help = 'upper limit to number of epochs for training')
-    parser.add_argument('--batch_size', type = int, default = 2,
+    parser.add_argument('--batch_size', type = int, default = 64,
                         help = 'batch size: number of sequences processed per step')
-    parser.add_argument('--eval_batch_size', type = int, default = 2,
+    parser.add_argument('--eval_batch_size', type = int, default = 64,
                         help = 'Evaluation batch size: number of sequences processed per step during evaluation')
     parser.add_argument('--bptt', type = int, default = 142,
                         help = 'sequence length') #TODO: Why bptt? Is 142 always the sequence length?
