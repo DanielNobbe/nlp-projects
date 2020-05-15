@@ -27,7 +27,12 @@ from rnnlm_model import RNNLM
 from data import padded_collate, get_datasets
 
 
-def main(args):
+def main(args, lr, layers, emsize, nhid):
+
+    lr = lr
+    layers = layers
+    emsize = emsize
+    nhid = nhid
 
     # Set the random seed manually for reproducibility.
     torch.manual_seed(args.seed)
@@ -79,12 +84,12 @@ def main(args):
     # Prerequisites for training
 
 
-    train_data, val_data, test_data = get_datasets()
+    train_data, val_data, test_data, small_data = get_datasets()
 
     # Build model
     vocab_size = train_data.tokenizer.vocab_size #TODO: shouldn't this be taken over the entire dataset and not just the training set?
-    model = RNNLM(ntoken = vocab_size, ninp = args.emsize, nhid = args.nhid,
-                    nlayers = args.nlayers, dropout = args.dropout).to(device)
+    model = RNNLM(ntoken = vocab_size, ninp = emsize, nhid = nhid,
+                    nlayers = layers, dropout = args.dropout).to(device)
 
     train_loader = DataLoader(
         train_data, batch_size = args.batch_size, shuffle = True,
@@ -100,6 +105,24 @@ def main(args):
         test_data, batch_size = args.eval_batch_size, shuffle = False, #TODO should this be true or false?
         collate_fn = padded_collate, num_workers = 1
     )
+
+    # TODO: remove
+    small_loader = DataLoader(
+        small_data, batch_size = args.batch_size, shuffle = True,
+        collate_fn = padded_collate, num_workers = 1
+    )
+    print('Small loader')
+    print(len(small_loader))
+
+    print('Small data')
+    print(len(small_data))
+
+    train_data = small_data
+    val_data = small_data
+    train_loader = small_loader
+    val_loader = small_loader
+
+    # Till here
 
     # optimizer = Adam(model.parameters(), lr = args.lr)
 
@@ -127,17 +150,21 @@ def main(args):
             last_hidden = model.init_hidden((batch_mod_diff))
             adapt_last_batch = True
 
-        hidden = model.init_hidden(args.eval_batch_size)
+        #hidden = model.init_hidden(args.eval_batch_size)
 
         with torch.no_grad():
             for batch, (source_batch, target_batch, lengths) in enumerate(data_loader, 0):
+
+                # TODO: See if this works by initialising for every batch
+                hidden = model.init_hidden(args.eval_batch_size)
+                #print(len(lengths))
 
                 if len(lengths) != args.eval_batch_size:
                     hidden = last_hidden
 
                 hidden = repackage_hidden(hidden)
 
-                output, hidden = model(source_batch, hidden, lengths)
+                output, hidden = model(source_batch.to(device), hidden.to(device), lengths)
 
                 # hidden = repackage_hidden(hidden)
 
@@ -146,9 +173,14 @@ def main(args):
                 pred = output.view(batches * seq_length, vocab_size)
                 target = target_batch.view(batches * seq_length)
 
-                total_loss += cross_entropy(pred, target, ignore_index = 0, reduction = 'sum').item() / batches #TODO: we need to figure out the appropriate way of calculating this
+                nll = cross_entropy(pred, target, ignore_index = 0, reduction = "none") #TODO
+                nll = nll.sum(-1)
+                loss = nll.mean()
+                total_loss += loss.item()
 
-            return total_loss /  (len(data_loader) - 1)
+                #total_loss += cross_entropy(pred, target, ignore_index = 0, reduction = 'sum').item() / batches #TODO: we need to figure out the appropriate way of calculating this
+
+            return total_loss /  (len(data_loader) - 1) # TODO: why minus 1?
 
 
 
@@ -167,10 +199,13 @@ def main(args):
             adapt_last_batch = True
 
         # initialize hidden variables of RNN
-        hidden = model.init_hidden(args.batch_size)
+        #hidden = model.init_hidden(args.batch_size)
 
         #for input_sentences_batch, target_sentences_batch, lengths in train_loader:
         for batch, (input_sentences_batch, target_sentences_batch, lengths) in enumerate(train_loader, 0):
+
+            # TODO: See if this works by initialising for every batch
+            hidden = model.init_hidden(args.batch_size)
 
             model.zero_grad()
 
@@ -179,15 +214,19 @@ def main(args):
 
             hidden = repackage_hidden(hidden)
 
-            output, hidden = model(input_sentences_batch, hidden, lengths)
+            output, hidden = model(input_sentences_batch.to(device),
+                                    hidden.to(device), lengths) #TODO: should both the input and hidden be .to(device)?
 
             batches, seq_length, vocab_size = output.shape
 
             pred = output.view(batches * seq_length, vocab_size)
-            target = target_sentences_batch.view(batches * seq_length)
+            target = target_sentences_batch.view(batches * seq_length).to(device)
 
             # loss = criterion(output, target_sentences_batch)
-            loss = cross_entropy(pred, target, ignore_index = 0, reduction = 'sum') / batches #TODO: should reduction be "sum" too?
+            #loss = cross_entropy(pred, target, ignore_index = 0, reduction = 'sum') / batches #TODO: should reduction be "sum" too?
+            nll = cross_entropy(pred, target, ignore_index = 0, reduction = "none") #TODO
+            nll = nll.sum(-1)
+            loss = nll.mean()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -206,17 +245,16 @@ def main(args):
 
                 elapsed = time.time() - start_time
 
-                print('| Current epoch: {:3d} | Learning rate: {:02.2f} | Current loss: {:5.2f} | Perplexity: {:8.2f} | Total loss {:5.2f}'.format(
+                print('| Current epoch: {:3d} | Learning rate: {:02.6f} | Current loss: {:5.2f} | Perplexity: {:8.2f} | Total loss {:5.2f}'.format(
                         epoch, lr, current_loss, math.exp(1), total_loss))
 
                 total_loss = 0
                 start_time = time.time()
 
                 # TODO: remove before tuning
-                break
-
-            # To speed things up during debugging. TODO: remove
-            # if batch == 40:
+                #break
+            #To speed things up during debugging. TODO: remove
+            # if batch == 1:
             #     break
 
 
@@ -226,7 +264,7 @@ def main(args):
 
 
     # initial learning rate
-    lr = args.lr
+    #lr = args.lr
     optimizer = Adam(model.parameters(), lr = lr)
 
     # store best validation loss
@@ -257,7 +295,7 @@ def main(args):
                 best_val_loss = val_loss
             else:
                 # Anneal the learning rate if we do not see improvement in validation loss
-                lr /= 4.0
+                lr /= 1.0
     except KeyboardInterrupt:
         print('-' * 89)
         print('Terminating training early.')
@@ -273,7 +311,8 @@ def main(args):
 
 
     # Evaluate best model on test data
-    test_loss = evaluate(test_loader, test_data)
+    #test_loss = evaluate(test_loader, test_data)
+    test_loss = evaluate(val_loader, val_data)
 
     print('=' * 89)
     print('|End of training and testing. | Test loss {:5.2f}'.format(test_loss))
@@ -283,7 +322,7 @@ def main(args):
 
 
 
-
+    return test_loss, model
 
 
 
@@ -302,7 +341,7 @@ if __name__ == "__main__":
                         help = 'number of hidden units per layer')
     parser.add_argument('--nlayers', type = int, default = 2,
                         help = 'number of layers')
-    parser.add_argument('--lr', type = float, default = 1,
+    parser.add_argument('--lr', type = float, default = 0.001,
                         help = 'initial learning rate')
     parser.add_argument('--clip', type = float, default = 0.25,
                         help = 'gradient clipping.') #TODO: Find out what gradient clipping is. --> Helps prevent exploding gradient problem for RNNs
@@ -326,8 +365,48 @@ if __name__ == "__main__":
                         help = 'relative path to save the final model')
     parser.add_argument('--onnx-export', type = str, default = '',
                         help = 'path to export the final model in onnx format') #TODO: What?
+    parser.add_argument('--save_best', type = str, default = 'best_rnnlm_model.pt',
+                        help = 'relative path to save best model after tuning.')
 
 
     args = parser.parse_args()
 
-    main(args)
+    #main(args)
+
+    lr_vec = [0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
+    # lr_vec = [0.05, 0.1]
+
+    layers_vec = [1, 2, 8, 16, 32, 64]
+    # layers_vec = [1, 2]
+
+    emsize_vec = [128, 256, 512, 1024]
+    # emsize_vec = [128, 256]
+
+    nhid_vec = [128, 256, 512, 1024, 2048]
+    # nhid_vec = [128, 256]
+
+    best_test_loss = None
+    best_model = None
+    best_hp = {}
+
+    for lr in lr_vec:
+        for layers in layers_vec:
+            for emsize in emsize_vec:
+                for nhid in nhid_vec:
+
+                    current_test_loss, current_model = main(args, lr, layers,
+                                                            emsize, nhid)
+                    if not best_test_loss or current_test_loss < best_test_loss:
+                        best_test_loss = current_test_loss
+                        best_model = current_model
+                        best_hp['Learning rate'] = lr
+                        best_hp['Layers'] = layers
+                        best_hp['Embedding size'] = emsize
+                        best_hp['Hidden units'] = nhid
+
+
+
+    print('Best hyperparameters')
+    print(best_hp)
+    with open(args.save_best, 'wb') as f:
+        torch.save(best_model, f)

@@ -66,20 +66,68 @@ class RNNLM(nn.Module):
 
     def forward(self, input, hidden, lengths):
 
-        embedding = self.drop(self.embedding(input))
+        #print(input.
+        batch_size = input.size(0)
+
+        # print('Input shape')
+        # print(input.shape)
+
+        embedded = self.drop(self.embedding(input))
+
+        # print('Embedded shape')
+        # print(embedded.shape)
+
+        packed = pack_padded_sequence(embedded, lengths, batch_first = True,
+                                        enforce_sorted = False)
+
+
+
+        #embedding = self.drop(self.embedding(input))
         #packed = self._embed_and_pack(input, lengths)
 
-        output, hidden = self.rnn(embedding, hidden)
-        # output, hidden = self.rnn(packed, hidden)
+        # print('Packed type')
+        # print(type(packed))
+        #
+        # print('Packed data shape')
+        # print(packed.data.shape)
+        #
+        # print('NU')
 
-        output = self.drop(output)
-        decoded = self.decoder(output)
+        #output, hidden = self.rnn(embedded, hidden)
+        output, hidden = self.rnn(packed, hidden)
+
+        # print('Type output')
+        # print(type(output))
+        #
+        # print('SHape output')
+        # print(output.data.shape)
+        #
+        # print('Type hidden')
+        # print(type(hidden))
+        #
+        # print('SHape hidden')
+        # print(hidden.shape)
+
+        #packed_decoder_input = _embed_and_pack(input, lengths)
+
+
+
+        # output = self.drop(output.data)
+        # decoded = self.decoder(output)
+        #
+        # unpacked, seq_lengths = pad_packed_sequence(decoded, batch_first = True)
 
         #unpacked, lengths = pad_packed_sequence(decoded, batch_first = True)
         #decoded = decoded.view(-1, self.ntoken) # TODO: either view(-1, seq_len, self.ntoken) or no resize
 
+        # How about this?
+        unpacked, seq_lengths = pad_packed_sequence(output, batch_first = True)
+
+        unpacked = self.drop(unpacked)
+        decoded = self.decoder(unpacked)
+
         #return F.log_softmax(decoded, dim = 1), hidden #TODO: use linear output and cross_entropy, or log_softmax and NLLLoss()
-        return decoded, hidden
+        return decoded, hidden #TODO: shouldn't this have a softmax layer like Equation (1e) in project description
 
     def init_hidden(self, bsz):
         weight = next(self.parameters())
