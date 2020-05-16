@@ -10,7 +10,7 @@ from torch.distributions.normal import Normal
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-from torch.optim import Adam
+from torch.optim import Adam, RMSprop
 from torch.nn.functional import cross_entropy
 
 from data import padded_collate, get_datasets
@@ -90,6 +90,7 @@ class Decoder(nn.Module):
 
         self.l2h = nn.Linear(latent_size, num_layers * hidden_size)
         self.rnn = nn.GRU(**gru_args)
+        self.lagrangian_multiplier = torch.nn.Parameter(torch.tensor([1.01])) # TODO: Maybe this should be a vector?
 
     def forward(self, z, input):
         h = self.l2h(z)
@@ -112,10 +113,7 @@ class SentenceVAE(nn.Module):
         num_layers,
         unk_token_idx,
         word_dropout_probability=0.0,
-<<<<<<< HEAD
         model_save_path='models',
-=======
->>>>>>> First implementation of FreeBits. Reordered the final steps in loss calculation somewhat. Added clamping to freebits value, if this is specified
         freebits = None,
     ):
         super(SentenceVAE, self).__init__()
@@ -164,6 +162,7 @@ class SentenceVAE(nn.Module):
 
         out = self.decoded2vocab(unpacked)
         return out, mean, std
+    
 
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
@@ -315,6 +314,16 @@ def train(
         freebits = freebits, # Freebits value is the lambda value as described in Kingma et al. 
     )
     model.to(device)
+
+    ### Define lagrangian parameter and optimizers
+    lagrangian_parameter = [p[1] for p in model.named_parameters() if p[0] == 'decoder.lagrangian_multiplier']
+    parameters = [p[1] for p in model.named_parameters() if p[0] != 'decoder.lagrangian_multiplier']
+
+    lagrangian_optimizer = RMSprop(lagrangian_parameter, lr=learning_rate) # TODO: Move this to other scope and use args.lr
+    general_optimizer = Adam(parameters, lr=learning_rate)
+
+    ###
+
 
     train_loader = DataLoader(
         train_data, batch_size=batch_size_train, shuffle=True, collate_fn=padded_collate
