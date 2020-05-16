@@ -1,3 +1,6 @@
+import argparse
+from pathlib import Path
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -109,8 +112,10 @@ class SentenceVAE(nn.Module):
         num_layers,
         unk_token_idx,
         word_dropout_probability=0.0,
+        model_save_path='models',
     ):
         super(SentenceVAE, self).__init__()
+        self.model_save_path = model_save_path
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size, embedding_dim=embedding_size
         )
@@ -153,11 +158,47 @@ class SentenceVAE(nn.Module):
         out = self.decoded2vocab(unpacked)
         return out, mean, std
 
+    def save_model(self, filename):
+        save_file_path = Path(self.model_save_path) / filename
+        torch.save(mode.state_dict(), save_file_path)
 
-def train_one_epoch(model, optimizer, data_loader, device):
+    def load_from(self, save_file_path):
+        self.load_state_dict(torch.load(save_file_path))
+
+
+
+
+def standard_vae_loss_terms(pred, target, ignore_index=0):
+    nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
+    nll = nll.sum(-1)
+
+    q = Normal(mean, std)
+    kl = kl_divergence(q, prior)
+    kl = kl.sum(-1)
+
+    # elbo = log-likelihood - D_kl
+    # max elbo <-> min -elbo
+    # -elbo = -log-likelihood + D_kl
+
+    print(
+        "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
+            nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
+        )
+    )
+
+    return nll, kl
+
+
+def standard_vae_loss(pred, target, ignore_index=0):
+    nll, kl = loss_standar_vae_loss_terms(pred, target, ignore_index=ignore_index)
+    loss = (nll + kl).mean()    # mean over batch
+    return loss
+
+
+def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index):
     prior = Normal(0.0, 1.0)
     model.train()
-    for bx, by, bl in data_loader:
+    for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
         logp, mean, std = model(bx.to(device), bl)
 
         b, l, c = logp.shape
@@ -166,44 +207,64 @@ def train_one_epoch(model, optimizer, data_loader, device):
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         # TODO ignore index is hardcoded here
-        nll = cross_entropy(pred, target, ignore_index=0, reduction="none")
-        nll = nll.sum(-1)
-
-        q = Normal(mean, std)
-        kl = kl_divergence(q, prior)
-        kl = kl.sum(-1)
-
-        # elbo = log-likelihood - D_kl
-        # max elbo <-> min -elbo
-        # -elbo = -log-likelihood + D_kl
-        loss = (nll + kl).mean()
-
-        print(
-            "nll mean: {} \t kl mean: {} \t loss: {}".format(
-                nll.mean().item(), kl.mean().item(), loss.item()
-            )
-        )
+        loss = standard_vae_loss(pred, target, ignore_index=pad_index)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
+        if (iteration % save_every) == 0:
+            model.save_model(f"sentence_vae_{iteration}.pt")
+
+    return iteration
+
+
+def evaluate(model, data_loader, device, padding_index):
+    model.eval()
+    total_loss = 0
+    total_num = 0
+    with torch.no_grad():
+        for iteration, (bx, by, bl) in enumerate(data_loader):
+            logp, mean, std = model(bx.to(device), bl)
+
+            b, l, c = logp.shape
+            pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+            target = by.to(device)  # target shape: (batch_size, seq_length)
+
+            # TODO Is this fixed now? What kind of values are we supposed to get here?
+            # TODO ignore index is hardcoded here
+            nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index)
+            loss = (nll + kl).sum()     # sum over batch
+            total_loss += loss
+            total_num += b
+
+    val_loss = total_loss / total_num
+
+    return val_loss
+
 
 def train(
-    epochs,
-    num_layers=2,
-    embedding_size=256,
-    hidden_size=128,
-    latent_size=32,
-    batch_size_train=64,
-    batch_size_valid=256,
-    learning_rate=0.001,
-    device=torch.device("cpu"),
-    word_dropout_probability=0.0,
+    data_path,
+    device,
+    num_epochs,
+    batch_size_train,
+    batch_size_valid,
+    learning_rate,
+    num_layers,
+    embedding_size,
+    hidden_size,
+    latent_size,
+    word_dropout,
+    print_every,
+    tensorboard_logging,
+    logdir,
+    model_save_path
 ):
 
-    train_data, val_data, test_data = get_datasets()
+    train_data, val_data, test_data = get_datasets(data_path)
+    device = torch.device(device)
     vocab_size = train_data.tokenizer.vocab_size
+    padding_index = train_data.tokenizer.pad_token_id
 
     model = SentenceVAE(
         vocab_size=vocab_size,
@@ -211,7 +272,7 @@ def train(
         hidden_size=hidden_size,
         latent_size=latent_size,
         num_layers=num_layers,
-        word_dropout_probability=word_dropout_probability,
+        word_dropout_probability=word_dropout,
         unk_token_idx=train_data.tokenizer.unk_token_id,
     )
     model.to(device)
@@ -226,12 +287,46 @@ def train(
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
 
-    for epoch in range(epochs):
-        train_one_epoch(model, optimizer, train_loader, device)
+    iterations = 0
+    for epoch in range(num_epochs):
+        iterations = train_one_epoch(model, optimizer, train_loader, device, start_step=iterations, padding_index=padding_index)
+        val_loss = evaluate(model, val_loader, device, padding_index=padding_index)
+        print(f"Epoch {epoch} finished, validation loss: {val_loss}")
+
+
+def parse_arguments(args=None):
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--data_path', type=str, default='../Data/Dataset')
+    parser.add_argument('-d', '--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', choices=['cuda', 'cpu'])
+
+    parser.add_argument('-ne', '--num_epochs', type=int, default=10)
+    parser.add_argument('-sbt', '--batch_size_train', type=int, default=32)
+    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=256)
+
+    parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
+
+    parser.add_argument('-nl', '--num_layers', type=int, default=1)
+    parser.add_argument('-se', '--embedding_size', type=int, default=300)
+    parser.add_argument('-sh', '--hidden_size', type=int, default=256)
+    parser.add_argument('-sl', '--latent_size', type=int, default=16)
+
+    parser.add_argument('-wd', '--word_dropout', type=float, default=0.0)
+
+    # TODO should we use dropout aftere the embedding?
+    # parser.add_argument('-ed', '--embedding_dropout', type=float, default=0.5)
+
+    parser.add_argument('-v','--print_every', type=int, default=50)
+    parser.add_argument('-tb','--tensorboard_logging', action='store_true')
+    parser.add_argument('-log','--logdir', type=str, default='logs')
+    parser.add_argument('-m','--model_save_path', type=str, default='models')
+
+    args = parser.parse_args()
+    return args
 
 
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
-    epochs = 4
-    train(epochs, device=device, word_dropout_probability=0.2)
+    args = parse_arguments()
+    print(args)
+    args = vars(args)
+    train(**args)
