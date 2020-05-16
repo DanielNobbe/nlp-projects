@@ -22,15 +22,6 @@ import pickle
 from rnnlm_model import RNNLM
 from data import padded_collate, get_datasets
 
-# Function Definitions
-# def repackage_hidden(h):
-#     """Wraps hidden states in new tensors, to detatch them from history"""
-#
-#     if isinstance(h, torch.Tensor):
-#         return h.detach()
-#     else:
-#         return tuple(repackage_hidden(v) for v in h)
-
 def evaluate(data_loader, dataset, device, model):
 
     # Disable dropout by switching to evaluation mode
@@ -46,19 +37,14 @@ def evaluate(data_loader, dataset, device, model):
         last_hidden = model.init_hidden((batch_mod_diff))
         adapt_last_batch = True
 
-    #hidden = model.init_hidden(args.eval_batch_size)
-
     with torch.no_grad():
         for batch, (source_batch, target_batch, lengths) in enumerate(data_loader, 0):
 
-            # TODO: See if this works by initialising for every batch
             hidden = model.init_hidden(args.eval_batch_size)
-            #print(len(lengths))
 
             if len(lengths) != args.eval_batch_size:
                 hidden = last_hidden
 
-            #hidden = repackage_hidden(hidden)
 
             output, hidden = model(source_batch.to(device), hidden.to(device), lengths)
 
@@ -74,15 +60,6 @@ def evaluate(data_loader, dataset, device, model):
 
             loss = nll
 
-            # pred = output.view(batches * seq_length, vocab_size)
-            # target = target_batch.view(batches * seq_length)
-            #
-            # # TODO: SHouldn't the loss calculation over here be adapted to Daniel Nobbe's idea?
-            #
-            # nll = cross_entropy(pred.to(device), target.to(device),
-            #                     ignore_index = 0, reduction = "none") #TODO
-            # nll = nll.sum(-1)
-            # loss = nll.mean()
             total_loss += loss.item()
 
         return total_loss /  len(data_loader)
@@ -92,8 +69,6 @@ def train(model, train_data, train_loader, args, device, optimizer, epoch):
 
 # Turn on training mode to enable dropout
     model.train()
-    #total_loss = 0.
-    #start_time = time.time()
 
     # Adapt dimensions of hidden state to match last batch size if dataset size isnt multiple of batch size
     adapt_last_batch = False
@@ -102,24 +77,15 @@ def train(model, train_data, train_loader, args, device, optimizer, epoch):
         last_hidden = model.init_hidden((batch_mod_diff))
         adapt_last_batch = True
 
-    # initialize hidden variables of RNN
-    #hidden = model.init_hidden(args.batch_size)
-
-    #for input_sentences_batch, target_sentences_batch, lengths in train_loader:
     for batch, (input_sentences_batch, target_sentences_batch, lengths) in enumerate(train_loader, 0):
 
-        # TODO: See if this works by initialising for every batch
         hidden = model.init_hidden(args.batch_size)
-
-        #model.zero_grad()
 
         if len(lengths) != args.batch_size:
             hidden = last_hidden
 
-        # hidden = repackage_hidden(hidden)
-
         output, hidden = model(input_sentences_batch.to(device),
-                                hidden.to(device), lengths) #TODO: should both the input and hidden be .to(device)?
+                                hidden.to(device), lengths)
 
         batches, seq_length, vocab_size = output.shape
 
@@ -137,80 +103,17 @@ def train(model, train_data, train_loader, args, device, optimizer, epoch):
         loss.backward()
         optimizer.step()
 
-        # pred = output.view(batches * seq_length, vocab_size)
-        # target = target_sentences_batch.view(batches * seq_length).to(device)
-        #
-        # # loss = criterion(output, target_sentences_batch)
-        # #loss = cross_entropy(pred, target, ignore_index = 0, reduction = 'sum') / batches #TODO: should reduction be "sum" too?
-        # nll = cross_entropy(pred.to(device), target.to(device),
-        #                     ignore_index = 0, reduction = "none") #TODO
-        # nll = nll.sum(-1)
-        # loss = nll.mean()
-        # optimizer.zero_grad()
-        # loss.backward()
-        # optimizer.step()
-
         if batch % args.log_interval == 0 and batch > 0:
 
             print('| Current epoch: {} | Current loss: {} | Perplexity: {} |'.format(epoch, loss, torch.exp(loss)))
 
 
-        # print("Loss: {}".format(loss.item()))
-        ################
-
-        # # `clip_grad_norm` is used to help prevent exploding gradient problem in RNNs (GRUs)
-        # torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-        # for p in model.parameters():
-        #     p.data.add_(-lr, p.grad.data)
-
-        ################
-        # Previous implementation (TO DELETE)
-        # total_loss += loss.item()
-        #
-        # # Evaluate loss every args.log_interval steps
-        # if batch % args.log_interval == 0 and batch > 0:
-        #
-        #     current_loss = total_loss / args.log_interval
-        #
-        #     elapsed = time.time() - start_time
-        #
-        #     print('| Current epoch: {:3d} | Learning rate: {:02.6f} | Current loss: {:5.2f} | Perplexity: {:8.2f} | Total loss {:5.2f}'.format(
-        #             epoch, lr, current_loss, math.exp(1), total_loss))
-        #
-        #     total_loss = 0
-        #     start_time = time.time()
-        ################
-
-            # TODO: remove before tuning
-            #break
-        #To speed things up during debugging. TODO: remove
-        # if batch == 1:
-        #     break
-
-
-
-
-
-# def main(args, lr, layers, emsize, nhid):
 def main(args, layers, emsize, nhid):
 
-    #Uncomment for traning and testing
-    # lr = args.lr
-    # layers = args.nlayers
-    # emsize = args.emsize
-    # nhid = args.nhid
-
-    # Uncomment for hp tuning
-    # lr = lr
     layers = layers
     emsize = emsize
     nhid = nhid
 
-    # Set the random seed manually for reproducibility.
-    # torch.manual_seed(args.seed)
-
-    # Use GPU is possible
-    # if args.cuda:
     # Check if GPU available
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -219,43 +122,7 @@ def main(args, layers, emsize, nhid):
         device = torch.device('cpu')
         print("GPU not available, CPU used instead.")
 
-    # Load data
-
-    # # Get path of current directory
-    # file_path = os.path.dirname(os.path.abspath(__file__))
-    #
-    # # Find data path relative to current directory
-    # relative_pickle_path = '/../Data/Dataset/Dataloader.pkl'
-    # pickle_path = file_path + relative_pickle_path
-    #
-    # # Open and unpickle Dataloader.pkl
-    # with open(pickle_path, 'rb') as file:
-    #     dataset = pickle.load(file)
-    # data_loader = data.DataLoader(dataset, args.batch_size, num_workers = 1)
-    # train_data = data.DataLoader(dataset._train_data,
-    #                             args.batch_size, num_workers = 1)
-    #
-    # # print a couple of sequences to see if it works.
-    # for sequence in data_loader:
-    #     print(sequence)
-    #     print(type(sequence))
-    #     print(sequence.size())
-    #     break
-
-
-
-    # Build RNN LM Model
-    #ntokens = dataset.vocab_size
-    # print(ntokens)
-    # model = RNNLM(ntoken = ntokens, ninp = args.emsize, nhid = args.nhid,
-    #                 nlayers = args.nlayers, dropout = args.dropout).to(device)
-    #
-    # use negative log-likelihood as loss / objective
-    # criterion = cross_entropy(ignore_index=0)
-
     # Prerequisites for training
-
-
     train_data, val_data, test_data, small_data = get_datasets()
 
     # Build model
@@ -284,35 +151,24 @@ def main(args, layers, emsize, nhid):
         collate_fn = padded_collate, num_workers = 1
     )
     # Uncomment for quick testing/debugging
-    print('Small loader')
-    print(len(small_loader))
-
-    print('Small data')
-    print(len(small_data))
-
-    train_data = small_data
-    val_data = small_data
-    test_data = small_data
-    train_loader = small_loader
-    val_loader = small_loader
-    test_loader = small_loader
+    # print('Small loader')
+    # print(len(small_loader))
+    #
+    # print('Small data')
+    # print(len(small_data))
+    #
+    # train_data = small_data
+    # val_data = small_data
+    # test_data = small_data
+    # train_loader = small_loader
+    # val_loader = small_loader
+    # test_loader = small_loader
 
     # Till here
 
     print('Split sizes | Train: {} | Val: {} | Test: {} |'.format(len(train_loader), len(val_loader),
                                             len(test_loader)))
 
-
-
-
-
-
-
-
-
-    # initial learning rate
-    #lr = args.lr
-    # optimizer = Adam(model.parameters(), lr = lr)
     optimizer = Adam(model.parameters())
     print(model)
 
@@ -325,7 +181,6 @@ def main(args, layers, emsize, nhid):
 
             epoch_start_time = time.time()
 
-            # train()
             train(model, train_data, train_loader, args, device, optimizer, epoch)
 
             val_loss = evaluate(val_loader, val_data, device, model)
@@ -359,23 +214,11 @@ def main(args, layers, emsize, nhid):
         # Ensure rnn parameters are a continuous chunk of memory
         model.rnn.flatten_parameters()
 
-
-    # Evaluate best model on test data
-    #test_loss = evaluate(test_loader, test_data)
     test_loss = evaluate(test_loader, test_data, device, model)
 
     print('=' * 89)
     print('|End of training and testing. | Test loss {:5.2f}'.format(test_loss))
     print('=' * 89)
-
-
-
-
-
-    # return test_loss, model
-
-
-
 
 
 if __name__ == "__main__":
@@ -421,54 +264,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # main(args)
-
     main(args, args.nlayers, args.emsize, args.nhid)
-
-    # current_test_loss, current_model = main(args, args, 256, 256)
-
-    # lr_vec = [0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
-    # #lr_vec = [0.05, 0.1]
-    #
-    # layers_vec = [1, 2, 8, 16, 32, 64]
-    # #layers_vec = [1, 2]
-    #
-    # emsize_vec = [128, 256, 512, 1024]
-    # #emsize_vec = [128, 256]
-    #
-    # nhid_vec = [128, 256, 512, 1024, 2048]
-    # #nhid_vec = [128, 256]
-    #
-    # best_test_loss = None
-    # best_model = None
-    # best_hp = {}
-    #
-    # for lr in lr_vec:
-    #     print("Learning rate")
-    #     print(lr)
-    #     for layers in layers_vec:
-    #         print("Layers")
-    #         print(layers)
-    #         for emsize in emsize_vec:
-    #             print("Embedding size")
-    #             print(emsize)
-    #             for nhid in nhid_vec:
-    #                 print("Hidden layer size")
-    #                 print(nhid)
-    #
-    #                 current_test_loss, current_model = main(args, lr, layers,
-    #                                                         emsize, nhid)
-    #                 if not best_test_loss or current_test_loss < best_test_loss:
-    #                     best_test_loss = current_test_loss
-    #                     best_model = current_model
-    #                     best_hp['Learning rate'] = lr
-    #                     best_hp['Layers'] = layers
-    #                     best_hp['Embedding size'] = emsize
-    #                     best_hp['Hidden units'] = nhid
-    #
-    #
-    #
-    # print('Best hyperparameters')
-    # print(best_hp)
-    # with open(args.save_best, 'wb') as f:
-    #     torch.save(best_model, f)
