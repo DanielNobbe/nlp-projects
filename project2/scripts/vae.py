@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -111,8 +112,10 @@ class SentenceVAE(nn.Module):
         num_layers,
         unk_token_idx,
         word_dropout_probability=0.0,
+        model_save_path='models',
     ):
         super(SentenceVAE, self).__init__()
+        self.model_save_path = model_save_path
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size, embedding_dim=embedding_size
         )
@@ -155,11 +158,39 @@ class SentenceVAE(nn.Module):
         out = self.decoded2vocab(unpacked)
         return out, mean, std
 
+    def save_model(self, filename):
+        save_file_path = Path(self.model_save_path) / filename
+        torch.save(mode.state_dict(), save_file_path)
 
-def train_one_epoch(model, optimizer, data_loader, device):
+    def load_from(self, save_file_path):
+        self.load_state_dict(torch.load(save_file_path))
+
+
+def loss_fn(pred, target, ignore_index=0):
+    nll = cross_entropy(pred, target, ignore_index=0, reduction="none")
+    nll = nll.sum(-1)
+
+    q = Normal(mean, std)
+    kl = kl_divergence(q, prior)
+    kl = kl.sum(-1)
+
+    # elbo = log-likelihood - D_kl
+    # max elbo <-> min -elbo
+    # -elbo = -log-likelihood + D_kl
+
+    print(
+        "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
+            nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
+        )
+    )
+
+    return nll, kl
+
+
+def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start):
     prior = Normal(0.0, 1.0)
     model.train()
-    for bx, by, bl in data_loader:
+    for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
         logp, mean, std = model(bx.to(device), bl)
 
         b, l, c = logp.shape
@@ -168,27 +199,41 @@ def train_one_epoch(model, optimizer, data_loader, device):
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         # TODO ignore index is hardcoded here
-        nll = cross_entropy(pred, target, ignore_index=0, reduction="none")
-        nll = nll.sum(-1)
-
-        q = Normal(mean, std)
-        kl = kl_divergence(q, prior)
-        kl = kl.sum(-1)
-
-        # elbo = log-likelihood - D_kl
-        # max elbo <-> min -elbo
-        # -elbo = -log-likelihood + D_kl
-        loss = (nll + kl).mean()
-
-        print(
-            "nll mean: {} \t kl mean: {} \t loss: {}".format(
-                nll.mean().item(), kl.mean().item(), loss.item()
-            )
-        )
+        nll, kl = loss_fn(pred, target, ignore_index=0)
+        loss = (nll + kl).mean()    # mean over batch
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        if (iteration % save_every) == 0:
+            model.save_model(f"sentence_vae_{iteration}.pt")
+
+    return iteration
+
+
+def evaluate(model, data_loader, device):
+    model.eval()
+    total_loss = 0
+    total_num = 0
+    with torch.no_grad():
+        for iteration, (bx, by, bl) in enumerate(data_loader):
+            logp, mean, std = model(bx.to(device), bl)
+
+            b, l, c = logp.shape
+            pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+            target = by.to(device)  # target shape: (batch_size, seq_length)
+
+            # TODO Is this fixed now? What kind of values are we supposed to get here?
+            # TODO ignore index is hardcoded here
+            nll, kl = loss_fn(pred, target, ignore_index=0)
+            loss = (nll + kl).sum()     # sum over batch
+            total_loss += loss
+            total_num += b
+
+    val_loss = total_loss / total_num
+
+    return val_loss
 
 
 def train(
@@ -234,8 +279,11 @@ def train(
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
 
+    iterations = 0
     for epoch in range(num_epochs):
-        train_one_epoch(model, optimizer, train_loader, device)
+        iterations = train_one_epoch(model, optimizer, train_loader, device, start_step=iterations)
+        val_loss = evaluate(model, val_loader, device)
+
 
 def parse_arguments(args=None):
     parser = argparse.ArgumentParser()
@@ -255,6 +303,8 @@ def parse_arguments(args=None):
     parser.add_argument('-sl', '--latent_size', type=int, default=16)
 
     parser.add_argument('-wd', '--word_dropout', type=float, default=0.0)
+
+    # TODO should we use dropout aftere the embedding?
     # parser.add_argument('-ed', '--embedding_dropout', type=float, default=0.5)
 
     parser.add_argument('-v','--print_every', type=int, default=50)
