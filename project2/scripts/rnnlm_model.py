@@ -40,23 +40,23 @@ class RNNLM(nn.Module):
         # and
         # "Tying Word Vectors and Word Classifiers: A Loss Framework for Language Modeling" (Inan et al. 2016)
         # https://arxiv.org/abs/1611.01462
-        if tie_weights:
-            if nhid != ninp:
-                raise ValueError('When using the tied flag, nhid must be equal to emsize')
-            self.decoder.weight = self.embedding.weight
+        # if tie_weights:
+        #     if nhid != ninp:
+        #         raise ValueError('When using the tied flag, nhid must be equal to emsize')
+        #     self.decoder.weight = self.embedding.weight
 
         # Call weight initialization function
-        self.init_weights()
+        # self.init_weights()
 
         self.rnn_type = rnn_type
         self.nhid = nhid
         self.nlayers = nlayers
 
-    def init_weights(self):
-        initrange = 0.1
-        self.embedding.weight.data.uniform_(-initrange, initrange)
-        self.decoder.bias.data.zero_()
-        self.decoder.weight.data.uniform_(-initrange, initrange)
+    # def init_weights(self):
+    #     initrange = 0.1
+    #     self.embedding.weight.data.uniform_(-initrange, initrange)
+    #     self.decoder.bias.data.zero_()
+    #     self.decoder.weight.data.uniform_(-initrange, initrange)
 
     def _embed_and_pack(self, input, lengths):
         embedded = self.drop(self.embedding(input))
@@ -66,26 +66,73 @@ class RNNLM(nn.Module):
 
     def forward(self, input, hidden, lengths):
 
-        embedding = self.drop(self.embedding(input))
+        #print(input.
+        batch_size = input.size(0)
+
+        # print('Input shape')
+        # print(input.shape)
+
+        embedded = self.drop(self.embedding(input))
+
+        # print('Embedded shape')
+        # print(embedded.shape)
+
+        packed = pack_padded_sequence(embedded, lengths, batch_first = True,
+                                        enforce_sorted = False)
+
+
+
+        #embedding = self.drop(self.embedding(input))
         #packed = self._embed_and_pack(input, lengths)
 
-        output, hidden = self.rnn(embedding, hidden)
-        # output, hidden = self.rnn(packed, hidden)
+        # print('Packed type')
+        # print(type(packed))
+        #
+        # print('Packed data shape')
+        # print(packed.data.shape)
+        #
+        # print('NU')
 
-        output = self.drop(output)
-        decoded = self.decoder(output)
+        #output, hidden = self.rnn(embedded, hidden)
+        output, hidden = self.rnn(packed, hidden)
+
+        # print('Type output')
+        # print(type(output))
+        #
+        # print('SHape output')
+        # print(output.data.shape)
+        #
+        # print('Type hidden')
+        # print(type(hidden))
+        #
+        # print('SHape hidden')
+        # print(hidden.shape)
+
+        #packed_decoder_input = _embed_and_pack(input, lengths)
+
+
+
+        # output = self.drop(output.data)
+        # decoded = self.decoder(output)
+        #
+        # unpacked, seq_lengths = pad_packed_sequence(decoded, batch_first = True)
 
         #unpacked, lengths = pad_packed_sequence(decoded, batch_first = True)
         #decoded = decoded.view(-1, self.ntoken) # TODO: either view(-1, seq_len, self.ntoken) or no resize
 
+        unpacked, seq_lengths = pad_packed_sequence(output, batch_first = True)
+
+        unpacked = self.drop(unpacked)
+        decoded = self.decoder(unpacked)
+
         #return F.log_softmax(decoded, dim = 1), hidden #TODO: use linear output and cross_entropy, or log_softmax and NLLLoss()
-        return decoded, hidden
+        return decoded, hidden #TODO: shouldn't this have a softmax layer like Equation (1e) in project description
 
     def init_hidden(self, bsz):
-        weight = next(self.parameters())
+        # weight = next(self.parameters())
 
         if self.rnn_type == 'LSTM':
-            return (weight.new_zeros(self.nlayers, bsz, self.nhid),
-                    weight.new_zeros(self.nlayers, bsz, self.nhid))
+            return (torch.zeros(self.nlayers, bsz, self.nhid),
+                    torch.zeros(self.nlayers, bsz, self.nhid))
         else:
-            return weight.new_zeros(self.nlayers, bsz, self.nhid)
+            return torch.zeros(self.nlayers, bsz, self.nhid)

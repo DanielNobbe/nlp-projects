@@ -37,7 +37,8 @@ def padded_collate(batch, pad_idx=0):
 
 
 def get_datasets(data_path="../Data/Dataset"):
-    data_path = Path(data_path)
+    file_directory = Path(__file__).parent.absolute()
+    data_path = file_directory / Path(data_path)
 
     training_set_path = data_path / "train"
     test_set_path = data_path / "test"
