@@ -166,8 +166,10 @@ class SentenceVAE(nn.Module):
         self.load_state_dict(torch.load(save_file_path))
 
 
-def loss_fn(pred, target, ignore_index=0):
-    nll = cross_entropy(pred, target, ignore_index=0, reduction="none")
+
+
+def standard_vae_loss_terms(pred, target, ignore_index=0):
+    nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1)
 
     q = Normal(mean, std)
@@ -187,7 +189,13 @@ def loss_fn(pred, target, ignore_index=0):
     return nll, kl
 
 
-def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start):
+def standard_vae_loss(pred, target, ignore_index=0):
+    nll, kl = loss_standar_vae_loss_terms(pred, target, ignore_index=ignore_index)
+    loss = (nll + kl).mean()    # mean over batch
+    return loss
+
+
+def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index):
     prior = Normal(0.0, 1.0)
     model.train()
     for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
@@ -199,8 +207,7 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         # TODO ignore index is hardcoded here
-        nll, kl = loss_fn(pred, target, ignore_index=0)
-        loss = (nll + kl).mean()    # mean over batch
+        loss = standard_vae_loss(pred, target, ignore_index=pad_index)
 
         optimizer.zero_grad()
         loss.backward()
@@ -212,7 +219,7 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
     return iteration
 
 
-def evaluate(model, data_loader, device):
+def evaluate(model, data_loader, device, padding_index):
     model.eval()
     total_loss = 0
     total_num = 0
@@ -226,7 +233,7 @@ def evaluate(model, data_loader, device):
 
             # TODO Is this fixed now? What kind of values are we supposed to get here?
             # TODO ignore index is hardcoded here
-            nll, kl = loss_fn(pred, target, ignore_index=0)
+            nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index)
             loss = (nll + kl).sum()     # sum over batch
             total_loss += loss
             total_num += b
@@ -257,6 +264,7 @@ def train(
     train_data, val_data, test_data = get_datasets(data_path)
     device = torch.device(device)
     vocab_size = train_data.tokenizer.vocab_size
+    padding_index = train_data.tokenizer.pad_token_id
 
     model = SentenceVAE(
         vocab_size=vocab_size,
@@ -281,8 +289,9 @@ def train(
 
     iterations = 0
     for epoch in range(num_epochs):
-        iterations = train_one_epoch(model, optimizer, train_loader, device, start_step=iterations)
-        val_loss = evaluate(model, val_loader, device)
+        iterations = train_one_epoch(model, optimizer, train_loader, device, start_step=iterations, padding_index=padding_index)
+        val_loss = evaluate(model, val_loader, device, padding_index=padding_index)
+        print(f"Epoch {epoch} finished, validation loss: {val_loss}")
 
 
 def parse_arguments(args=None):
