@@ -163,7 +163,7 @@ def train_one_epoch(model, optimizer, data_loader, device):
         b, l, c = logp.shape
         pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
         target = by.to(device)  # target shape: (batch_size, seq_length)
-
+        print("Shapes: ", logp.shape, target.shape)
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         # TODO ignore index is hardcoded here
         nll = cross_entropy(pred, target, ignore_index=0, reduction="none")
@@ -231,7 +231,7 @@ def train(
 
 
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # print(device)
     epochs = 4
-    train(epochs, device=device, word_dropout_probability=0.2)
+    train(epochs, word_dropout_probability=0.2)
