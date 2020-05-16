@@ -1,3 +1,5 @@
+import argparse
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -162,7 +164,7 @@ def train_one_epoch(model, optimizer, data_loader, device):
 
         b, l, c = logp.shape
         pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
-        target = by  # target shape: (batch_size, seq_length)
+        target = by.to(device)  # target shape: (batch_size, seq_length)
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         # TODO ignore index is hardcoded here
@@ -190,19 +192,25 @@ def train_one_epoch(model, optimizer, data_loader, device):
 
 
 def train(
-    epochs,
-    num_layers=2,
-    embedding_size=256,
-    hidden_size=128,
-    latent_size=32,
-    batch_size_train=64,
-    batch_size_valid=256,
-    learning_rate=0.001,
-    device=torch.device("cpu"),
-    word_dropout_probability=0.0,
+    data_path,
+    device,
+    num_epochs,
+    batch_size_train,
+    batch_size_valid,
+    learning_rate,
+    num_layers,
+    embedding_size,
+    hidden_size,
+    latent_size,
+    word_dropout,
+    print_every,
+    tensorboard_logging,
+    logdir,
+    model_save_path
 ):
 
-    train_data, val_data, test_data = get_datasets()
+    train_data, val_data, test_data = get_datasets(data_path)
+    device = torch.device(device)
     vocab_size = train_data.tokenizer.vocab_size
 
     model = SentenceVAE(
@@ -211,7 +219,7 @@ def train(
         hidden_size=hidden_size,
         latent_size=latent_size,
         num_layers=num_layers,
-        word_dropout_probability=word_dropout_probability,
+        word_dropout_probability=word_dropout,
         unk_token_idx=train_data.tokenizer.unk_token_id,
     )
     model.to(device)
@@ -226,12 +234,40 @@ def train(
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
 
-    for epoch in range(epochs):
+    for epoch in range(num_epochs):
         train_one_epoch(model, optimizer, train_loader, device)
+
+def parse_arguments(args=None):
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--data_path', type=str, default='../Data/Dataset')
+    parser.add_argument('-d', '--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', choices=['cuda', 'cpu'])
+
+    parser.add_argument('-ne', '--num_epochs', type=int, default=10)
+    parser.add_argument('-sbt', '--batch_size_train', type=int, default=32)
+    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=256)
+
+    parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
+
+    parser.add_argument('-nl', '--num_layers', type=int, default=1)
+    parser.add_argument('-se', '--embedding_size', type=int, default=300)
+    parser.add_argument('-sh', '--hidden_size', type=int, default=256)
+    parser.add_argument('-sl', '--latent_size', type=int, default=16)
+
+    parser.add_argument('-wd', '--word_dropout', type=float, default=0.0)
+    # parser.add_argument('-ed', '--embedding_dropout', type=float, default=0.5)
+
+    parser.add_argument('-v','--print_every', type=int, default=50)
+    parser.add_argument('-tb','--tensorboard_logging', action='store_true')
+    parser.add_argument('-log','--logdir', type=str, default='logs')
+    parser.add_argument('-m','--model_save_path', type=str, default='models')
+
+    args = parser.parse_args()
+    return args
 
 
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
-    epochs = 4
-    train(epochs, device=device, word_dropout_probability=0.2)
+    args = parse_arguments()
+    print(args)
+    args = vars(args)
+    train(**args)
