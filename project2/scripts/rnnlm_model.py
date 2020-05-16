@@ -11,8 +11,8 @@ class RNNLM(nn.Module):
     """Container module for RNN Language Model. Consists of an embedder,
     a recurrent module, and a decoder."""
 
-    def __init__(self, ntoken, ninp, nhid, nlayers, rnn_type = 'GRU', dropout = 0.2,
-    tie_weights = False):
+    def __init__(self, ntoken, ninp, nhid, nlayers, rnn_type = 'GRU', dropout = 0.2):
+    # tie_weights = False):
 
         super(RNNLM, self).__init__()
         self.ntoken = ntoken
@@ -40,23 +40,23 @@ class RNNLM(nn.Module):
         # and
         # "Tying Word Vectors and Word Classifiers: A Loss Framework for Language Modeling" (Inan et al. 2016)
         # https://arxiv.org/abs/1611.01462
-        if tie_weights:
-            if nhid != ninp:
-                raise ValueError('When using the tied flag, nhid must be equal to emsize')
-            self.decoder.weight = self.embedding.weight
+        # if tie_weights:
+        #     if nhid != ninp:
+        #         raise ValueError('When using the tied flag, nhid must be equal to emsize')
+        #     self.decoder.weight = self.embedding.weight
 
         # Call weight initialization function
-        self.init_weights()
+        # self.init_weights()
 
         self.rnn_type = rnn_type
         self.nhid = nhid
         self.nlayers = nlayers
 
-    def init_weights(self):
-        initrange = 0.1
-        self.embedding.weight.data.uniform_(-initrange, initrange)
-        self.decoder.bias.data.zero_()
-        self.decoder.weight.data.uniform_(-initrange, initrange)
+    # def init_weights(self):
+    #     initrange = 0.1
+    #     self.embedding.weight.data.uniform_(-initrange, initrange)
+    #     self.decoder.bias.data.zero_()
+    #     self.decoder.weight.data.uniform_(-initrange, initrange)
 
     def _embed_and_pack(self, input, lengths):
         embedded = self.drop(self.embedding(input))
@@ -130,10 +130,10 @@ class RNNLM(nn.Module):
         return decoded, hidden #TODO: shouldn't this have a softmax layer like Equation (1e) in project description
 
     def init_hidden(self, bsz):
-        weight = next(self.parameters())
+        # weight = next(self.parameters())
 
         if self.rnn_type == 'LSTM':
-            return (weight.new_zeros(self.nlayers, bsz, self.nhid),
-                    weight.new_zeros(self.nlayers, bsz, self.nhid))
+            return (torch.zeros(self.nlayers, bsz, self.nhid),
+                    torch.zeros(self.nlayers, bsz, self.nhid))
         else:
-            return weight.new_zeros(self.nlayers, bsz, self.nhid)
+            return torch.zeros(self.nlayers, bsz, self.nhid)

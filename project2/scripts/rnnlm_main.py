@@ -19,31 +19,195 @@ from torch.utils.data import DataLoader
 import torch.onnx
 from torch.optim import Adam
 import pickle
-
 from rnnlm_model import RNNLM
-#import rnnlm_model
-#from Preprocessing_RNN import SentenceDataset
-
 from data import padded_collate, get_datasets
+
+# Function Definitions
+# def repackage_hidden(h):
+#     """Wraps hidden states in new tensors, to detatch them from history"""
+#
+#     if isinstance(h, torch.Tensor):
+#         return h.detach()
+#     else:
+#         return tuple(repackage_hidden(v) for v in h)
+
+def evaluate(data_loader, dataset, device, model):
+
+    # Disable dropout by switching to evaluation mode
+    model.eval()
+
+    total_loss = 0.
+
+    # TODO: find more elegant solution for this last batch problem
+    # Adapt dimensions of hidden state to match last batch size if dataset size isnt multiple of batch size
+    adapt_last_batch = False
+    batch_mod_diff = len(dataset) % args.eval_batch_size
+    if batch_mod_diff != 0:
+        last_hidden = model.init_hidden((batch_mod_diff))
+        adapt_last_batch = True
+
+    #hidden = model.init_hidden(args.eval_batch_size)
+
+    with torch.no_grad():
+        for batch, (source_batch, target_batch, lengths) in enumerate(data_loader, 0):
+
+            # TODO: See if this works by initialising for every batch
+            hidden = model.init_hidden(args.eval_batch_size)
+            #print(len(lengths))
+
+            if len(lengths) != args.eval_batch_size:
+                hidden = last_hidden
+
+            #hidden = repackage_hidden(hidden)
+
+            output, hidden = model(source_batch.to(device), hidden.to(device), lengths)
+
+            # hidden = repackage_hidden(hidden)
+
+            batches, seq_length, vocab_size = output.shape
+
+            output = output.transpose(1, 2) # transpose output because cross_entropy expected the number of classes as second dim.
+
+            target = target_batch.to(device)
+
+            nll = cross_entropy(output, target, ignore_index = data_loader.dataset.tokenizer.pad_token_id)
+
+            loss = nll
+
+            # pred = output.view(batches * seq_length, vocab_size)
+            # target = target_batch.view(batches * seq_length)
+            #
+            # # TODO: SHouldn't the loss calculation over here be adapted to Daniel Nobbe's idea?
+            #
+            # nll = cross_entropy(pred.to(device), target.to(device),
+            #                     ignore_index = 0, reduction = "none") #TODO
+            # nll = nll.sum(-1)
+            # loss = nll.mean()
+            total_loss += loss.item()
+
+        return total_loss /  len(data_loader)
+
+
+def train(model, train_data, train_loader, args, device, optimizer, epoch):
+
+# Turn on training mode to enable dropout
+    model.train()
+    #total_loss = 0.
+    #start_time = time.time()
+
+    # Adapt dimensions of hidden state to match last batch size if dataset size isnt multiple of batch size
+    adapt_last_batch = False
+    batch_mod_diff = len(train_data) % args.batch_size
+    if batch_mod_diff != 0:
+        last_hidden = model.init_hidden((batch_mod_diff))
+        adapt_last_batch = True
+
+    # initialize hidden variables of RNN
+    #hidden = model.init_hidden(args.batch_size)
+
+    #for input_sentences_batch, target_sentences_batch, lengths in train_loader:
+    for batch, (input_sentences_batch, target_sentences_batch, lengths) in enumerate(train_loader, 0):
+
+        # TODO: See if this works by initialising for every batch
+        hidden = model.init_hidden(args.batch_size)
+
+        #model.zero_grad()
+
+        if len(lengths) != args.batch_size:
+            hidden = last_hidden
+
+        # hidden = repackage_hidden(hidden)
+
+        output, hidden = model(input_sentences_batch.to(device),
+                                hidden.to(device), lengths) #TODO: should both the input and hidden be .to(device)?
+
+        batches, seq_length, vocab_size = output.shape
+
+        ################
+        # Daniel's idea:
+        output = output.transpose(1, 2) # transpose output because cross_entropy expected the number of classes as second dim.
+
+        target = target_sentences_batch.to(device)
+
+        nll = cross_entropy(output, target, ignore_index = train_loader.dataset.tokenizer.pad_token_id)
+
+        loss = nll
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # pred = output.view(batches * seq_length, vocab_size)
+        # target = target_sentences_batch.view(batches * seq_length).to(device)
+        #
+        # # loss = criterion(output, target_sentences_batch)
+        # #loss = cross_entropy(pred, target, ignore_index = 0, reduction = 'sum') / batches #TODO: should reduction be "sum" too?
+        # nll = cross_entropy(pred.to(device), target.to(device),
+        #                     ignore_index = 0, reduction = "none") #TODO
+        # nll = nll.sum(-1)
+        # loss = nll.mean()
+        # optimizer.zero_grad()
+        # loss.backward()
+        # optimizer.step()
+
+        if batch % args.log_interval == 0 and batch > 0:
+
+            print('| Current epoch: {} | Current loss: {} | Perplexity: {} |'.format(epoch, loss, torch.exp(loss)))
+
+
+        # print("Loss: {}".format(loss.item()))
+        ################
+
+        # # `clip_grad_norm` is used to help prevent exploding gradient problem in RNNs (GRUs)
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+        # for p in model.parameters():
+        #     p.data.add_(-lr, p.grad.data)
+
+        ################
+        # Previous implementation (TO DELETE)
+        # total_loss += loss.item()
+        #
+        # # Evaluate loss every args.log_interval steps
+        # if batch % args.log_interval == 0 and batch > 0:
+        #
+        #     current_loss = total_loss / args.log_interval
+        #
+        #     elapsed = time.time() - start_time
+        #
+        #     print('| Current epoch: {:3d} | Learning rate: {:02.6f} | Current loss: {:5.2f} | Perplexity: {:8.2f} | Total loss {:5.2f}'.format(
+        #             epoch, lr, current_loss, math.exp(1), total_loss))
+        #
+        #     total_loss = 0
+        #     start_time = time.time()
+        ################
+
+            # TODO: remove before tuning
+            #break
+        #To speed things up during debugging. TODO: remove
+        # if batch == 1:
+        #     break
+
+
+
 
 
 # def main(args, lr, layers, emsize, nhid):
-def main(args):
+def main(args, layers, emsize, nhid):
 
     #Uncomment for traning and testing
-    lr = args.lr
-    layers = args.nlayers
-    emsize = args.emsize
-    nhid = args.nhid
+    # lr = args.lr
+    # layers = args.nlayers
+    # emsize = args.emsize
+    # nhid = args.nhid
 
     # Uncomment for hp tuning
     # lr = lr
-    # layers = layers
-    # emsize = emsize
-    # nhid = nhid
+    layers = layers
+    emsize = emsize
+    nhid = nhid
 
     # Set the random seed manually for reproducibility.
-    torch.manual_seed(args.seed)
+    # torch.manual_seed(args.seed)
 
     # Use GPU is possible
     # if args.cuda:
@@ -120,158 +284,25 @@ def main(args):
         collate_fn = padded_collate, num_workers = 1
     )
     # Uncomment for quick testing/debugging
-    # print('Small loader')
-    # print(len(small_loader))
-    #
-    # print('Small data')
-    # print(len(small_data))
-    #
-    # train_data = small_data
-    # val_data = small_data
-    # test_data = small_data
-    # train_loader = small_loader
-    # val_loader = small_loader
-    # test_loader = small_loader
+    print('Small loader')
+    print(len(small_loader))
+
+    print('Small data')
+    print(len(small_data))
+
+    train_data = small_data
+    val_data = small_data
+    test_data = small_data
+    train_loader = small_loader
+    val_loader = small_loader
+    test_loader = small_loader
 
     # Till here
 
     print('Split sizes | Train: {} | Val: {} | Test: {} |'.format(len(train_loader), len(val_loader),
                                             len(test_loader)))
 
-    # optimizer = Adam(model.parameters(), lr = args.lr)
 
-    def repackage_hidden(h):
-        """Wraps hidden states in new tensors, to detatch them from history"""
-
-        if isinstance(h, torch.Tensor):
-            return h.detach()
-        else:
-            return tuple(repackage_hidden(v) for v in h)
-
-
-    def evaluate(data_loader, dataset):
-
-        # Disable dropout by switching to evaluation mode
-        model.eval()
-
-        total_loss = 0.
-
-        # TODO: find more elegant solution for this last batch problem
-        # Adapt dimensions of hidden state to match last batch size if dataset size isnt multiple of batch size
-        adapt_last_batch = False
-        batch_mod_diff = len(dataset) % args.eval_batch_size
-        if batch_mod_diff != 0:
-            last_hidden = model.init_hidden((batch_mod_diff))
-            adapt_last_batch = True
-
-        #hidden = model.init_hidden(args.eval_batch_size)
-
-        with torch.no_grad():
-            for batch, (source_batch, target_batch, lengths) in enumerate(data_loader, 0):
-
-                # TODO: See if this works by initialising for every batch
-                hidden = model.init_hidden(args.eval_batch_size)
-                #print(len(lengths))
-
-                if len(lengths) != args.eval_batch_size:
-                    hidden = last_hidden
-
-                hidden = repackage_hidden(hidden)
-
-                output, hidden = model(source_batch.to(device), hidden.to(device), lengths)
-
-                # hidden = repackage_hidden(hidden)
-
-                batches, seq_length, vocab_size = output.shape
-
-                pred = output.view(batches * seq_length, vocab_size)
-                target = target_batch.view(batches * seq_length)
-
-                nll = cross_entropy(pred.to(device), target.to(device),
-                                    ignore_index = 0, reduction = "none") #TODO
-                nll = nll.sum(-1)
-                loss = nll.mean()
-                total_loss += loss.item()
-
-                #total_loss += cross_entropy(pred, target, ignore_index = 0, reduction = 'sum').item() / batches #TODO: we need to figure out the appropriate way of calculating this
-
-            return total_loss /  len(data_loader) # TODO: why minus 1?
-
-
-
-    def train():
-
-    # Turn on training mode to enable dropout
-        model.train()
-        total_loss = 0.
-        start_time = time.time()
-
-        # Adapt dimensions of hidden state to match last batch size if dataset size isnt multiple of batch size
-        adapt_last_batch = False
-        batch_mod_diff = len(train_data) % args.batch_size
-        if batch_mod_diff != 0:
-            last_hidden = model.init_hidden((batch_mod_diff))
-            adapt_last_batch = True
-
-        # initialize hidden variables of RNN
-        #hidden = model.init_hidden(args.batch_size)
-
-        #for input_sentences_batch, target_sentences_batch, lengths in train_loader:
-        for batch, (input_sentences_batch, target_sentences_batch, lengths) in enumerate(train_loader, 0):
-
-            # TODO: See if this works by initialising for every batch
-            hidden = model.init_hidden(args.batch_size)
-
-            model.zero_grad()
-
-            if len(lengths) != args.batch_size:
-                hidden = last_hidden
-
-            hidden = repackage_hidden(hidden)
-
-            output, hidden = model(input_sentences_batch.to(device),
-                                    hidden.to(device), lengths) #TODO: should both the input and hidden be .to(device)?
-
-            batches, seq_length, vocab_size = output.shape
-
-            pred = output.view(batches * seq_length, vocab_size)
-            target = target_sentences_batch.view(batches * seq_length).to(device)
-
-            # loss = criterion(output, target_sentences_batch)
-            #loss = cross_entropy(pred, target, ignore_index = 0, reduction = 'sum') / batches #TODO: should reduction be "sum" too?
-            nll = cross_entropy(pred.to(device), target.to(device),
-                                ignore_index = 0, reduction = "none") #TODO
-            nll = nll.sum(-1)
-            loss = nll.mean()
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            # `clip_grad_norm` is used to help prevent exploding gradient problem in RNNs (GRUs)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-            for p in model.parameters():
-                p.data.add_(-lr, p.grad.data)
-
-            total_loss += loss.item()
-
-            # Evaluate loss every args.log_interval steps
-            if batch % args.log_interval == 0 and batch > 0:
-
-                current_loss = total_loss / args.log_interval
-
-                elapsed = time.time() - start_time
-
-                print('| Current epoch: {:3d} | Learning rate: {:02.6f} | Current loss: {:5.2f} | Perplexity: {:8.2f} | Total loss {:5.2f}'.format(
-                        epoch, lr, current_loss, math.exp(1), total_loss))
-
-                total_loss = 0
-                start_time = time.time()
-
-                # TODO: remove before tuning
-                #break
-            #To speed things up during debugging. TODO: remove
-            # if batch == 1:
-            #     break
 
 
 
@@ -281,7 +312,9 @@ def main(args):
 
     # initial learning rate
     #lr = args.lr
-    optimizer = Adam(model.parameters(), lr = lr)
+    # optimizer = Adam(model.parameters(), lr = lr)
+    optimizer = Adam(model.parameters())
+    print(model)
 
     # store best validation loss
     best_val_loss = None
@@ -292,9 +325,10 @@ def main(args):
 
             epoch_start_time = time.time()
 
-            train()
+            # train()
+            train(model, train_data, train_loader, args, device, optimizer, epoch)
 
-            val_loss = evaluate(val_loader, val_data)
+            val_loss = evaluate(val_loader, val_data, device, model)
 
             print('-' * 89)
 
@@ -328,7 +362,7 @@ def main(args):
 
     # Evaluate best model on test data
     #test_loss = evaluate(test_loader, test_data)
-    test_loss = evaluate(val_loader, val_data)
+    test_loss = evaluate(test_loader, test_data, device, model)
 
     print('=' * 89)
     print('|End of training and testing. | Test loss {:5.2f}'.format(test_loss))
@@ -338,7 +372,7 @@ def main(args):
 
 
 
-    return test_loss, model
+    # return test_loss, model
 
 
 
@@ -387,7 +421,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args)
+    # main(args)
+
+    main(args, args.nlayers, args.emsize, args.nhid)
+
+    # current_test_loss, current_model = main(args, args, 256, 256)
 
     # lr_vec = [0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
     # #lr_vec = [0.05, 0.1]
