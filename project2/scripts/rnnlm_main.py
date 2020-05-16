@@ -27,12 +27,20 @@ from rnnlm_model import RNNLM
 from data import padded_collate, get_datasets
 
 
-def main(args, lr, layers, emsize, nhid):
+# def main(args, lr, layers, emsize, nhid):
+def main(args):
 
-    lr = lr
-    layers = layers
-    emsize = emsize
-    nhid = nhid
+    #Uncomment for traning and testing
+    lr = args.lr
+    layers = args.nlayers
+    emsize = args.emsize
+    nhid = args.nhid
+
+    # Uncomment for hp tuning
+    # lr = lr
+    # layers = layers
+    # emsize = emsize
+    # nhid = nhid
 
     # Set the random seed manually for reproducibility.
     torch.manual_seed(args.seed)
@@ -92,17 +100,17 @@ def main(args, lr, layers, emsize, nhid):
                     nlayers = layers, dropout = args.dropout).to(device)
 
     train_loader = DataLoader(
-        train_data, batch_size = args.batch_size, shuffle = True,
+        train_data, batch_size = args.batch_size, shuffle = False,
         collate_fn = padded_collate, num_workers = 1
     )
 
     val_loader = DataLoader(
-        val_data, batch_size = args.eval_batch_size, shuffle = False, #TODO should this be true or false?
+        val_data, batch_size = args.eval_batch_size, shuffle = False,
         collate_fn = padded_collate, num_workers = 1
     )
 
     test_loader = DataLoader(
-        test_data, batch_size = args.eval_batch_size, shuffle = False, #TODO should this be true or false?
+        test_data, batch_size = args.eval_batch_size, shuffle = False,
         collate_fn = padded_collate, num_workers = 1
     )
 
@@ -111,18 +119,24 @@ def main(args, lr, layers, emsize, nhid):
         small_data, batch_size = args.batch_size, shuffle = True,
         collate_fn = padded_collate, num_workers = 1
     )
-    print('Small loader')
-    print(len(small_loader))
-
-    print('Small data')
-    print(len(small_data))
-
-    train_data = small_data
-    val_data = small_data
-    train_loader = small_loader
-    val_loader = small_loader
+    # Uncomment for quick testing/debugging
+    # print('Small loader')
+    # print(len(small_loader))
+    #
+    # print('Small data')
+    # print(len(small_data))
+    #
+    # train_data = small_data
+    # val_data = small_data
+    # test_data = small_data
+    # train_loader = small_loader
+    # val_loader = small_loader
+    # test_loader = small_loader
 
     # Till here
+
+    print('Split sizes | Train: {} | Val: {} | Test: {} |'.format(len(train_loader), len(val_loader),
+                                            len(test_loader)))
 
     # optimizer = Adam(model.parameters(), lr = args.lr)
 
@@ -173,14 +187,15 @@ def main(args, lr, layers, emsize, nhid):
                 pred = output.view(batches * seq_length, vocab_size)
                 target = target_batch.view(batches * seq_length)
 
-                nll = cross_entropy(pred, target, ignore_index = 0, reduction = "none") #TODO
+                nll = cross_entropy(pred.to(device), target.to(device),
+                                    ignore_index = 0, reduction = "none") #TODO
                 nll = nll.sum(-1)
                 loss = nll.mean()
                 total_loss += loss.item()
 
                 #total_loss += cross_entropy(pred, target, ignore_index = 0, reduction = 'sum').item() / batches #TODO: we need to figure out the appropriate way of calculating this
 
-            return total_loss /  (len(data_loader) - 1) # TODO: why minus 1?
+            return total_loss /  len(data_loader) # TODO: why minus 1?
 
 
 
@@ -224,7 +239,8 @@ def main(args, lr, layers, emsize, nhid):
 
             # loss = criterion(output, target_sentences_batch)
             #loss = cross_entropy(pred, target, ignore_index = 0, reduction = 'sum') / batches #TODO: should reduction be "sum" too?
-            nll = cross_entropy(pred, target, ignore_index = 0, reduction = "none") #TODO
+            nll = cross_entropy(pred.to(device), target.to(device),
+                                ignore_index = 0, reduction = "none") #TODO
             nll = nll.sum(-1)
             loss = nll.mean()
             optimizer.zero_grad()
@@ -295,7 +311,7 @@ def main(args, lr, layers, emsize, nhid):
                 best_val_loss = val_loss
             else:
                 # Anneal the learning rate if we do not see improvement in validation loss
-                lr /= 1.0
+                lr /= 1.25
     except KeyboardInterrupt:
         print('-' * 89)
         print('Terminating training early.')
@@ -371,42 +387,50 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    #main(args)
+    main(args)
 
-    lr_vec = [0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
-    # lr_vec = [0.05, 0.1]
-
-    layers_vec = [1, 2, 8, 16, 32, 64]
-    # layers_vec = [1, 2]
-
-    emsize_vec = [128, 256, 512, 1024]
-    # emsize_vec = [128, 256]
-
-    nhid_vec = [128, 256, 512, 1024, 2048]
-    # nhid_vec = [128, 256]
-
-    best_test_loss = None
-    best_model = None
-    best_hp = {}
-
-    for lr in lr_vec:
-        for layers in layers_vec:
-            for emsize in emsize_vec:
-                for nhid in nhid_vec:
-
-                    current_test_loss, current_model = main(args, lr, layers,
-                                                            emsize, nhid)
-                    if not best_test_loss or current_test_loss < best_test_loss:
-                        best_test_loss = current_test_loss
-                        best_model = current_model
-                        best_hp['Learning rate'] = lr
-                        best_hp['Layers'] = layers
-                        best_hp['Embedding size'] = emsize
-                        best_hp['Hidden units'] = nhid
-
-
-
-    print('Best hyperparameters')
-    print(best_hp)
-    with open(args.save_best, 'wb') as f:
-        torch.save(best_model, f)
+    # lr_vec = [0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
+    # #lr_vec = [0.05, 0.1]
+    #
+    # layers_vec = [1, 2, 8, 16, 32, 64]
+    # #layers_vec = [1, 2]
+    #
+    # emsize_vec = [128, 256, 512, 1024]
+    # #emsize_vec = [128, 256]
+    #
+    # nhid_vec = [128, 256, 512, 1024, 2048]
+    # #nhid_vec = [128, 256]
+    #
+    # best_test_loss = None
+    # best_model = None
+    # best_hp = {}
+    #
+    # for lr in lr_vec:
+    #     print("Learning rate")
+    #     print(lr)
+    #     for layers in layers_vec:
+    #         print("Layers")
+    #         print(layers)
+    #         for emsize in emsize_vec:
+    #             print("Embedding size")
+    #             print(emsize)
+    #             for nhid in nhid_vec:
+    #                 print("Hidden layer size")
+    #                 print(nhid)
+    #
+    #                 current_test_loss, current_model = main(args, lr, layers,
+    #                                                         emsize, nhid)
+    #                 if not best_test_loss or current_test_loss < best_test_loss:
+    #                     best_test_loss = current_test_loss
+    #                     best_model = current_model
+    #                     best_hp['Learning rate'] = lr
+    #                     best_hp['Layers'] = layers
+    #                     best_hp['Embedding size'] = emsize
+    #                     best_hp['Hidden units'] = nhid
+    #
+    #
+    #
+    # print('Best hyperparameters')
+    # print(best_hp)
+    # with open(args.save_best, 'wb') as f:
+    #     torch.save(best_model, f)
