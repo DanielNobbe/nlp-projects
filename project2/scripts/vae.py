@@ -200,7 +200,7 @@ def standard_vae_loss(pred, target, mean, std, ignore_index=0, print_loss=True):
     return loss
 
 
-def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5):
+def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5, print_loss=True):
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none", print_loss=True)
     nll = nll.sum(-1).mean() # First sum the nll over all dims, then average over batch
 
@@ -219,11 +219,12 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
     # -elbo = -log-likelihood + D_kl
     loss = (nll + kl)  
 
-    print(
-        "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
-            nll.item(), kl.item(), loss.item()
+    if print_loss:
+        print(
+            "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
+                nll.item(), kl.item(), loss.item()
+            )
         )
-    )
 
     return loss
 
