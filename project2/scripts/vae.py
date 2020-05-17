@@ -190,14 +190,14 @@ def standard_vae_loss_terms(pred, target, ignore_index=0):
 
     return nll, kl
 
-
 def standard_vae_loss(pred, target, ignore_index=0):
     nll, kl = loss_standar_vae_loss_terms(pred, target, ignore_index=ignore_index)
     loss = (nll + kl).mean()    # mean over batch
     return loss
 
-def freebits_vae_loss(pred, target, ignore_index = pad_index):
-    nll = cross_entropy(pred, target, ignore_index=0, reduction="none")
+
+def freebits_vae_loss(pred, target, ignore_index = 0, prior=Normal(0.0, 1.0)):
+    nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1).mean() # First sum the nll over all dims, then average over batch
 
     q = Normal(mean, std)
@@ -239,7 +239,7 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
         if model.freebits is None:
             loss = standard_vae_loss(pred, target, ignore_index=pad_index)
         elif model.freebits is not None: # Set up structure for when MDR is added
-            loss = freebits_vae_loss(pred, target, ignore_index = pad_index)
+            loss = freebits_vae_loss(pred, target, ignore_index = pad_index, prior = prior)
         
         print(
             "nll mean: {} \t kl mean: {} \t loss: {}".format(
@@ -293,6 +293,7 @@ def train(
     hidden_size,
     latent_size,
     word_dropout,
+    freebits,
     print_every,
     tensorboard_logging,
     logdir,
@@ -312,7 +313,7 @@ def train(
         num_layers=num_layers,
         word_dropout_probability=word_dropout,
         unk_token_idx=train_data.tokenizer.unk_token_id,
-        freebits = 1, # Freebits value is the lambda value as described in Kingma et al. 
+        freebits = freebits, # Freebits value is the lambda value as described in Kingma et al. 
     )
     model.to(device)
 
@@ -359,21 +360,17 @@ def parse_arguments(args=None):
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
     parser.add_argument('-log','--logdir', type=str, default='logs')
     parser.add_argument('-m','--model_save_path', type=str, default='models')
+    parser.add_argument('--freebits', type=float, default=None)
 
     args = parser.parse_args()
     return args
 
+    # Now, save state dict
+    
+
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     args = parse_arguments()
     print(args)
     args = vars(args)
     train(**args)
-=======
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device('cpu')
-    print(device)
-    epochs = 4
-    train(epochs, device=device, word_dropout_probability=0.2)
->>>>>>> First implementation of FreeBits. Reordered the final steps in loss calculation somewhat. Added clamping to freebits value, if this is specified
