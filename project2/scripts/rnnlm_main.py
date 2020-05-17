@@ -29,7 +29,6 @@ def evaluate(data_loader, dataset, device, model):
 
     total_loss = 0.
 
-    # TODO: find more elegant solution for this last batch problem
     # Adapt dimensions of hidden state to match last batch size if dataset size isnt multiple of batch size
     adapt_last_batch = False
     batch_mod_diff = len(dataset) % args.eval_batch_size
@@ -103,32 +102,35 @@ def train(model, train_data, train_loader, args, device, optimizer, epoch):
         loss.backward()
         optimizer.step()
 
+        #`clip_grad_norm` is used to help prevent exploding gradient problem in RNNs (GRUs)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+        for p in model.parameters():
+            p.data.add_(-optimizer.param_groups[0]['lr'],
+                        p.grad.data)
+
+
         if batch % args.log_interval == 0 and batch > 0:
 
             print('| Current epoch: {} | Current loss: {} | Perplexity: {} |'.format(epoch, loss, torch.exp(loss)))
 
 
-def main(args, layers, emsize, nhid):
+def main(args):
 
-    layers = layers
-    emsize = emsize
-    nhid = nhid
-
-    # Check if GPU available
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        print('GPU is available.')
+    # If passed through command line, check if CUDA available and use GPU if possible
+    if args.cuda:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print('Device: {}'.format(device))
     else:
         device = torch.device('cpu')
-        print("GPU not available, CPU used instead.")
+        print('Device: {}'.format(device))
 
     # Prerequisites for training
     train_data, val_data, test_data, small_data = get_datasets()
 
     # Build model
-    vocab_size = train_data.tokenizer.vocab_size #TODO: shouldn't this be taken over the entire dataset and not just the training set?
-    model = RNNLM(ntoken = vocab_size, ninp = emsize, nhid = nhid,
-                    nlayers = layers, dropout = args.dropout).to(device)
+    vocab_size = train_data.tokenizer.vocab_size
+    model = RNNLM(ntoken = vocab_size, ninp = args.emsize, nhid = args.nhid,
+                    nlayers = args.nlayers, dropout = args.dropout).to(device)
 
     train_loader = DataLoader(
         train_data, batch_size = args.batch_size, shuffle = False,
@@ -145,31 +147,31 @@ def main(args, layers, emsize, nhid):
         collate_fn = padded_collate, num_workers = 1
     )
 
-    # TODO: remove
+    # TODO: remove before submission
     small_loader = DataLoader(
         small_data, batch_size = args.batch_size, shuffle = True,
         collate_fn = padded_collate, num_workers = 1
     )
     # Uncomment for quick testing/debugging
-    # print('Small loader')
-    # print(len(small_loader))
-    #
-    # print('Small data')
-    # print(len(small_data))
-    #
-    # train_data = small_data
-    # val_data = small_data
-    # test_data = small_data
-    # train_loader = small_loader
-    # val_loader = small_loader
-    # test_loader = small_loader
+    print('Small loader')
+    print(len(small_loader))
+
+    print('Small data')
+    print(len(small_data))
+
+    train_data = small_data
+    val_data = small_data
+    test_data = small_data
+    train_loader = small_loader
+    val_loader = small_loader
+    test_loader = small_loader
 
     # Till here
 
     print('Split sizes | Train: {} | Val: {} | Test: {} |'.format(len(train_loader), len(val_loader),
                                             len(test_loader)))
 
-    optimizer = Adam(model.parameters())
+    optimizer = Adam(model.parameters(), lr = args.lr)
     print(model)
 
     # store best validation loss
@@ -192,15 +194,11 @@ def main(args, layers, emsize, nhid):
 
             print('-' * 89)
 
-            #TODO: Save the model with the best validation loss until now in a folder containing all models in separate directories
             if not best_val_loss or val_loss < best_val_loss:
                 with open(args.save, 'wb') as f:
                     torch.save(model, f)
 
                 best_val_loss = val_loss
-            else:
-                # Anneal the learning rate if we do not see improvement in validation loss
-                lr /= 1.25
     except KeyboardInterrupt:
         print('-' * 89)
         print('Terminating training early.')
@@ -224,44 +222,34 @@ def main(args, layers, emsize, nhid):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description = 'Main training script for RNN LM.')
-    parser.add_argument('--seed', type = int, default = 2020,
-                        help = 'seed for reproducibility of stochastic results')
     parser.add_argument('--model', type = str, default = 'GRU',
                         help = 'type of recurrent net (LSTM, GRU)')
-    parser.add_argument('--emsize', type = int, default = 200,
+    parser.add_argument('--emsize', type = int, default = 512,
                         help = 'size of word embeddings')
-    parser.add_argument('--nhid', type = int, default = 200,
+    parser.add_argument('--nhid', type = int, default = 512,
                         help = 'number of hidden units per layer')
-    parser.add_argument('--nlayers', type = int, default = 2,
+    parser.add_argument('--nlayers', type = int, default = 1,
                         help = 'number of layers')
     parser.add_argument('--lr', type = float, default = 0.001,
                         help = 'initial learning rate')
     parser.add_argument('--clip', type = float, default = 0.25,
-                        help = 'gradient clipping.') #TODO: Find out what gradient clipping is. --> Helps prevent exploding gradient problem for RNNs
-    parser.add_argument('--epochs', type = int, default = 5,
+                        help = 'gradient clipping. Helps prevent exploding gradient problem for RNNs.')
+    parser.add_argument('--epochs', type = int, default = 10,
                         help = 'upper limit to number of epochs for training')
-    parser.add_argument('--batch_size', type = int, default = 64,
+    parser.add_argument('--batch_size', type = int, default = 32,
                         help = 'batch size: number of sequences processed per step')
-    parser.add_argument('--eval_batch_size', type = int, default = 64,
+    parser.add_argument('--eval_batch_size', type = int, default = 32,
                         help = 'Evaluation batch size: number of sequences processed per step during evaluation')
-    parser.add_argument('--bptt', type = int, default = 142,
-                        help = 'sequence length') #TODO: Why bptt? Is 142 always the sequence length?
-    parser.add_argument('--dropout', type = float, default = 0.2,
+    parser.add_argument('--dropout', type = float, default = 0.34,
                         help = 'probability of dropout applied to layers (set to 0 for no dropout)')
-    parser.add_argument('--tied', action = 'store_false',
-                        help = 'tie the word embedding and softmax weights') # TODO: figure out what this is and if should be store_true by default
     parser.add_argument('--cuda', action = 'store_true',
-                        help = 'use CUDA') # TODO: figure out why CUDA isn't working
-    parser.add_argument('--log_interval', type = int, default = 20, metavar = 'N',
+                        help = 'use CUDA')
+    parser.add_argument('--log_interval', type = int, default = 200, metavar = 'N',
                         help = 'report / log interval')
     parser.add_argument('--save', type = str, default = 'rnnlm_model.pt',
                         help = 'relative path to save the final model')
-    parser.add_argument('--onnx-export', type = str, default = '',
-                        help = 'path to export the final model in onnx format') #TODO: What?
-    parser.add_argument('--save_best', type = str, default = 'best_rnnlm_model.pt',
-                        help = 'relative path to save best model after tuning.')
 
 
     args = parser.parse_args()
 
-    main(args, args.nlayers, args.emsize, args.nhid)
+    main(args)
