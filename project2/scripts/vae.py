@@ -113,6 +113,7 @@ class SentenceVAE(nn.Module):
         unk_token_idx,
         word_dropout_probability=0.0,
         model_save_path='models',
+        freebits = None,
     ):
         super(SentenceVAE, self).__init__()
         self.model_save_path = model_save_path
@@ -131,6 +132,7 @@ class SentenceVAE(nn.Module):
         self.decoded2vocab = nn.Linear(
             hidden_size, vocab_size
         )  # TODO should this be in the decoder
+        self.freebits = freebits
 
     def _embed_and_pack(self, input, lengths):
         embedded = self.embedding(input)
@@ -194,6 +196,34 @@ def standard_vae_loss(pred, target, ignore_index=0):
     loss = (nll + kl).mean()    # mean over batch
     return loss
 
+def freebits_vae_loss(pred, target, ignore_index = pad_index):
+    nll = cross_entropy(pred, target, ignore_index=0, reduction="none")
+    nll = nll.sum(-1).mean() # First sum the nll over all dims, then average over batch
+
+    q = Normal(mean, std)
+    kl = kl_divergence(q, prior)
+    kl = kl.mean(0) # Average over batch. Keep dimensions intact
+
+    # If freebits is specified, the kl divergence along each dimension should be clamped to be higher than this value
+    # The distributions used here are simple normal distributions, with no off-diagonal variance terms.
+    # As such, the KL divergence is applied elementwise. 
+    kl = torch.clamp(kl, min = model.freebits)
+
+    kl = kl.sum(-1) # Sum kl over all dimensions
+
+    # elbo = log-likelihood - D_kl
+    # max elbo <-> min -elbo
+    # -elbo = -log-likelihood + D_kl
+    loss = (nll + kl)  
+
+    print(
+        "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
+            nll.item(), kl.item(), loss.item()
+        )
+    )
+
+    return loss
+
 
 def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index):
     prior = Normal(0.0, 1.0)
@@ -206,8 +236,16 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
         target = by.to(device)  # target shape: (batch_size, seq_length)
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
-        # TODO ignore index is hardcoded here
-        loss = standard_vae_loss(pred, target, ignore_index=pad_index)
+        if model.freebits is None:
+            loss = standard_vae_loss(pred, target, ignore_index=pad_index)
+        elif model.freebits is not None: # Set up structure for when MDR is added
+            loss = freebits_vae_loss(pred, target, ignore_index = pad_index)
+        
+        print(
+            "nll mean: {} \t kl mean: {} \t loss: {}".format(
+                nll.mean().item(), kl.mean().item(), loss.item()
+            )
+        )
 
         optimizer.zero_grad()
         loss.backward()
@@ -274,6 +312,7 @@ def train(
         num_layers=num_layers,
         word_dropout_probability=word_dropout,
         unk_token_idx=train_data.tokenizer.unk_token_id,
+        freebits = 1, # Freebits value is the lambda value as described in Kingma et al. 
     )
     model.to(device)
 
@@ -326,7 +365,15 @@ def parse_arguments(args=None):
 
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     args = parse_arguments()
     print(args)
     args = vars(args)
     train(**args)
+=======
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device('cpu')
+    print(device)
+    epochs = 4
+    train(epochs, device=device, word_dropout_probability=0.2)
+>>>>>>> First implementation of FreeBits. Reordered the final steps in loss calculation somewhat. Added clamping to freebits value, if this is specified
