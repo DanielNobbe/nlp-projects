@@ -302,7 +302,7 @@ def evaluate(model, data_loader, device, padding_index):
 
             # TODO Is this fixed now? What kind of values are we supposed to get here?
             # TODO ignore index is hardcoded here
-            nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index)
+            nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index)
             loss = (nll + kl).sum()     # sum over batch
             total_loss += loss
             total_num += b
