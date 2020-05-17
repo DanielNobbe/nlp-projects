@@ -228,7 +228,7 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
     return loss
 
 
-def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index):
+def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50):
     prior = Normal(0.0, 1.0)
     model.train()
     for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
