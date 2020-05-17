@@ -297,7 +297,7 @@ def train_one_epoch_MDR(model, lagrangian_optimizer, general_optimizer, data_loa
     return iteration
 
 
-def evaluate(model, data_loader, device, padding_index):
+def evaluate(model, data_loader, device, padding_index, print_every=50):
     model.eval()
     total_loss = 0
     total_num = 0
@@ -311,7 +311,8 @@ def evaluate(model, data_loader, device, padding_index):
 
             # TODO Is this fixed now? What kind of values are we supposed to get here?
             # TODO ignore index is hardcoded here
-            nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index)
+            print_loss = (iteration % print_every == 0)
+            nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss)
             loss = (nll + kl).sum()     # sum over batch
             total_loss += loss
             total_num += b
