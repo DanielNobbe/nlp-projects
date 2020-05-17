@@ -285,7 +285,7 @@ def train_one_epoch_MDR(model, lagrangian_optimizer, general_optimizer, data_loa
         general_optimizer.step()
 
         if (iteration % save_every) == 0:
-                model.save_model(f"sentence_vae_MDR_{minimum_rate}_{iteration}.pt")
+            model.save_model(f"sentence_vae_MDR_{minimum_rate}_{iteration}.pt")
 
 
 def evaluate(model, data_loader, device, padding_index):
