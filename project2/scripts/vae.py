@@ -283,6 +283,8 @@ def train_one_epoch_MDR(model, lagrangian_optimizer, general_optimizer, data_loa
         # Update with the two optimizers
         lagrangian_optimizer.step()
         general_optimizer.step()
+        lagrangian_optimizer.zero_grad()
+        general_optimizer.zero_grad()
 
         if (iteration % save_every) == 0:
             model.save_model(f"sentence_vae_MDR_{minimum_rate}_{iteration}.pt")
