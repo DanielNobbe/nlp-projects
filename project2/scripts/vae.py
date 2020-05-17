@@ -201,7 +201,7 @@ def standard_vae_loss(pred, target, mean, std, ignore_index=0, print_loss=True):
 
 
 def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5):
-    nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
+    nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none", print_loss=True)
     nll = nll.sum(-1).mean() # First sum the nll over all dims, then average over batch
 
     q = Normal(mean, std)
@@ -238,11 +238,13 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
         pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
         target = by.to(device)  # target shape: (batch_size, seq_length)
 
+        print_loss = (iteration % print_every == 0)
+
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         if model.freebits is None:
-            loss = standard_vae_loss(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=True)
+            loss = standard_vae_loss(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss)
         elif model.freebits is not None: # Set up structure for when MDR is added
-            loss = freebits_vae_loss(pred, target, ignore_index = padding_index, prior = prior, mean=mean, std=std, freebits = model.freebits)
+            loss = freebits_vae_loss(pred, target, ignore_index = padding_index, prior = prior, mean=mean, std=std, freebits = model.freebits, print_loss=print_loss)
 
         optimizer.zero_grad()
         loss.backward()
@@ -256,7 +258,7 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
 
     return iteration
 
-def train_one_epoch_MDR(model, lagrangian_optimizer, general_optimizer, data_loader, device, save_every, iter_start, padding_index, minimum_rate=1.0):
+def train_one_epoch_MDR(model, lagrangian_optimizer, general_optimizer, data_loader, device, save_every, iter_start, padding_index, minimum_rate=1.0, print_every=50):
     prior = Normal(0.0, 1.0)
     model.train()
 
@@ -268,7 +270,9 @@ def train_one_epoch_MDR(model, lagrangian_optimizer, general_optimizer, data_loa
         pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
         target = by.to(device)  # target shape: (batch_size, seq_length)
 
-        nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=True)
+        print_loss = (iteration % print_every == 0)
+
+        nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss)
         elbo = (nll + kl).mean() # This is the negative elbo, which should be minimized
 
         loss = -(-elbo - model.decoder.lagrangian_multiplier * (minimum_rate - kl.mean()) ) # MDR constrained optimization loss
@@ -378,11 +382,11 @@ def train(
     iterations = 0
     for epoch in range(num_epochs):
         if MDR is None:
-            iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, padding_index=padding_index, save_every=save_every)
+            iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, padding_index=padding_index, save_every=save_every, print_every=print_every)
         else:
             iterations = train_one_epoch_MDR(model, lagrangian_optimizer, optimizer, train_loader, device, 
                 iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR)
-        val_loss = evaluate(model, val_loader, device, padding_index=padding_index)
+        val_loss = evaluate(model, val_loader, device, padding_index=padding_index, print_every=print_every)
         print(f"Epoch {epoch} finished, validation loss: {val_loss}")
 
 
