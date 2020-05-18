@@ -13,6 +13,8 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.optim import Adam
 from torch.nn.functional import cross_entropy
 
+from tqdm import tqdm
+
 from data import padded_collate, get_datasets
 
 
@@ -116,6 +118,7 @@ class SentenceVAE(nn.Module):
     ):
         super(SentenceVAE, self).__init__()
         self.model_save_path = model_save_path
+        Path(self.model_save_path).mkdir(exist_ok=True, parents=True)
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size, embedding_dim=embedding_size
         )
@@ -160,7 +163,7 @@ class SentenceVAE(nn.Module):
 
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
-        torch.save(mode.state_dict(), save_file_path)
+        torch.save(self.state_dict(), save_file_path)
 
     def load_from(self, save_file_path):
         self.load_state_dict(torch.load(save_file_path))
@@ -168,7 +171,8 @@ class SentenceVAE(nn.Module):
 
 
 
-def standard_vae_loss_terms(pred, target, ignore_index=0):
+def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0):
+    prior = Normal(0.0, 1.0)
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1)
 
@@ -180,7 +184,8 @@ def standard_vae_loss_terms(pred, target, ignore_index=0):
     # max elbo <-> min -elbo
     # -elbo = -log-likelihood + D_kl
 
-    print(
+    # print(
+    tqdm.write(
         "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
             nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
         )
@@ -189,16 +194,15 @@ def standard_vae_loss_terms(pred, target, ignore_index=0):
     return nll, kl
 
 
-def standard_vae_loss(pred, target, ignore_index=0):
-    nll, kl = loss_standar_vae_loss_terms(pred, target, ignore_index=ignore_index)
+def standard_vae_loss(pred, target, mean, std, ignore_index=0):
+    nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=ignore_index)
     loss = (nll + kl).mean()    # mean over batch
     return loss
 
 
 def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index):
-    prior = Normal(0.0, 1.0)
     model.train()
-    for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
+    for iteration, (bx, by, bl) in enumerate(tqdm(data_loader), start=iter_start):
         logp, mean, std = model(bx.to(device), bl)
 
         b, l, c = logp.shape
@@ -207,7 +211,7 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         # TODO ignore index is hardcoded here
-        loss = standard_vae_loss(pred, target, ignore_index=pad_index)
+        loss = standard_vae_loss(pred, target, mean, std, ignore_index=padding_index)
 
         optimizer.zero_grad()
         loss.backward()
@@ -233,7 +237,7 @@ def evaluate(model, data_loader, device, padding_index):
 
             # TODO Is this fixed now? What kind of values are we supposed to get here?
             # TODO ignore index is hardcoded here
-            nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index)
+            nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index)
             loss = (nll + kl).sum()     # sum over batch
             total_loss += loss
             total_num += b
@@ -258,7 +262,8 @@ def train(
     print_every,
     tensorboard_logging,
     logdir,
-    model_save_path
+    model_save_path,
+    save_every,
 ):
 
     train_data, val_data, test_data = get_datasets(data_path)
@@ -289,7 +294,11 @@ def train(
 
     iterations = 0
     for epoch in range(num_epochs):
-        iterations = train_one_epoch(model, optimizer, train_loader, device, start_step=iterations, padding_index=padding_index)
+        try:
+            iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, padding_index=padding_index, save_every=save_every)
+        except KeyboardInterrupt:
+            pass
+
         val_loss = evaluate(model, val_loader, device, padding_index=padding_index)
         print(f"Epoch {epoch} finished, validation loss: {val_loss}")
 
@@ -302,7 +311,7 @@ def parse_arguments(args=None):
 
     parser.add_argument('-ne', '--num_epochs', type=int, default=10)
     parser.add_argument('-sbt', '--batch_size_train', type=int, default=32)
-    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=256)
+    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=128)
 
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
 
@@ -320,6 +329,7 @@ def parse_arguments(args=None):
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
     parser.add_argument('-log','--logdir', type=str, default='logs')
     parser.add_argument('-m','--model_save_path', type=str, default='models')
+    parser.add_argument('-e','--save_every', type=int, default=1000)
 
     args = parser.parse_args()
     return args
