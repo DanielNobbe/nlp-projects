@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+from datetime import datetime
 
 import torch
 from torch import nn
@@ -228,7 +229,7 @@ def evaluate(model, data_loader, device, padding_index):
     total_loss = 0
     total_num = 0
     with torch.no_grad():
-        for iteration, (bx, by, bl) in enumerate(data_loader):
+        for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
             logp, mean, std = model(bx.to(device), bl)
 
             b, l, c = logp.shape
@@ -266,6 +267,8 @@ def train(
     save_every,
 ):
 
+    start_time = datetime.now()
+
     train_data, val_data, test_data = get_datasets(data_path)
     device = torch.device(device)
     vocab_size = train_data.tokenizer.vocab_size
@@ -294,13 +297,23 @@ def train(
 
     iterations = 0
     for epoch in range(num_epochs):
+        epoch_start_time = datetime.now()
         try:
             iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, padding_index=padding_index, save_every=save_every)
         except KeyboardInterrupt:
-            pass
+            print("Manually stopped current epoch")
 
+        print("Training this epoch took {}".format(datetime.now() - epoch_start_time))
+
+        print("Validation phase:")
         val_loss = evaluate(model, val_loader, device, padding_index=padding_index)
+
+        print(f"###################################################")
         print(f"Epoch {epoch} finished, validation loss: {val_loss}")
+        print(f"###################################################")
+        print("Current epoch training took {}".format(datetime.now()-epoch_start_time))
+
+    print("Training took {}".format(datetime.now() - start_time))
 
 
 def parse_arguments(args=None):
