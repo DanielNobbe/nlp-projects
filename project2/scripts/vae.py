@@ -2,6 +2,8 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+import numpy as np
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -119,6 +121,7 @@ class SentenceVAE(nn.Module):
     ):
         super(SentenceVAE, self).__init__()
         self.model_save_path = model_save_path
+        self.saved_model_files = []
         Path(self.model_save_path).mkdir(exist_ok=True, parents=True)
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size, embedding_dim=embedding_size
@@ -165,6 +168,7 @@ class SentenceVAE(nn.Module):
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
         torch.save(self.state_dict(), save_file_path)
+        self.saved_model_files.append(filename)
 
     def load_from(self, save_file_path):
         self.load_state_dict(torch.load(save_file_path))
@@ -265,6 +269,7 @@ def train(
     logdir,
     model_save_path,
     save_every,
+    early_stopping_patience,
 ):
 
     start_time = datetime.now()
@@ -296,24 +301,43 @@ def train(
     optimizer = Adam(model.parameters(), lr=learning_rate)
 
     iterations = 0
+    patience = 0
+    best_val_loss = torch.tensor(np.inf, device=device)
+    best_model = None
     for epoch in range(num_epochs):
         epoch_start_time = datetime.now()
         try:
             iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, padding_index=padding_index, save_every=save_every)
         except KeyboardInterrupt:
             print("Manually stopped current epoch")
+            __import__('pdb').set_trace()
 
         print("Training this epoch took {}".format(datetime.now() - epoch_start_time))
 
         print("Validation phase:")
         val_loss = evaluate(model, val_loader, device, padding_index=padding_index)
 
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model = model.saved_model_files[-1]
+            patience = 0
+            __import__('pdb').set_trace()
+        else:
+            patience += 1
+            if patience >= early_stopping_patience:
+                print("EARLY STOPPING")
+                break
+
+
         print(f"###################################################")
         print(f"Epoch {epoch} finished, validation loss: {val_loss}")
         print(f"###################################################")
         print("Current epoch training took {}".format(datetime.now()-epoch_start_time))
 
+
     print("Training took {}".format(datetime.now() - start_time))
+    print(f"Best validation loss: {best_val_loss}")
+    print(f"Best model: {best_model}")
 
 
 def parse_arguments(args=None):
@@ -342,7 +366,8 @@ def parse_arguments(args=None):
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
     parser.add_argument('-log','--logdir', type=str, default='logs')
     parser.add_argument('-m','--model_save_path', type=str, default='models')
-    parser.add_argument('-e','--save_every', type=int, default=1000)
+    parser.add_argument('-si','--save_every', type=int, default=1000)
+    parser.add_argument('-es', '--early_stopping_patience', type=int, default=2)
 
     args = parser.parse_args()
     return args
