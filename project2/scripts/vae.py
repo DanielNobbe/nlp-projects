@@ -90,7 +90,6 @@ class Decoder(nn.Module):
 
         self.l2h = nn.Linear(latent_size, num_layers * hidden_size)
         self.rnn = nn.GRU(**gru_args)
-        self.lagrangian_multiplier = torch.nn.Parameter(torch.tensor([1.01])) # TODO: Maybe this should be a vector?
 
     def forward(self, z, input):
         h = self.l2h(z)
@@ -101,6 +100,15 @@ class Decoder(nn.Module):
         output, hn = self.rnn(input, h)
 
         return output
+
+
+class Lagrangian(nn.Module):
+    def __init__(self, minimum_desired_rate):
+        self.lagrangian_multiplier = torch.nn.Parameter(torch.tensor([1.01])) # TODO: Maybe this should be a vector?
+        self.minimum_desired_rate = minimum_desired_rate
+
+    def forward(self, kl):
+        return self.lagrangian_multiplier * (self.minimum_desired_rate - kl.mean())
 
 
 class SentenceVAE(nn.Module):
@@ -114,7 +122,7 @@ class SentenceVAE(nn.Module):
         unk_token_idx,
         word_dropout_probability=0.0,
         model_save_path='models',
-        freebits = None,
+        freebits=None,
     ):
         super(SentenceVAE, self).__init__()
         self.model_save_path = model_save_path
@@ -275,15 +283,16 @@ def train_one_epoch_MDR(model, lagrangian_optimizer, general_optimizer, data_loa
 
         nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss)
         elbo = (nll + kl).mean() # This is the negative elbo, which should be minimized
+        lagrangian_loss = lagrangian(kl)
 
-        loss = -(-elbo - model.decoder.lagrangian_multiplier * (minimum_rate - kl.mean()) ) # MDR constrained optimization loss
+        loss = -(-elbo - lagrangian_loss) # MDR constrained optimization loss
         general_optimizer.zero_grad()
         lagrangian_optimizer.zero_grad()
 
         loss.backward()
 
         # Invert gradient for lagrangian parameter
-        lagrangian_optimizer.param_groups[0]['params'][0].grad = -1 * lagrangian_optimizer.param_groups[0]['params'][0].grad
+        lagrangian.lagrangian_multiplier.grad *= -1
 
         # Update with the two optimizers
         lagrangian_optimizer.step()
@@ -358,15 +367,15 @@ def train(
         unk_token_idx=train_data.tokenizer.unk_token_id,
         freebits = freebits, # Freebits value is the lambda value as described in Kingma et al. 
     )
+    lagrangian = Lagrangian(MDR)
+
     model.to(device)
+    lagrangian.to(device)
 
     if MDR is not None:
         ### Define lagrangian parameter and optimizers
-        lagrangian_parameter = [p[1] for p in model.named_parameters() if p[0] == 'decoder.lagrangian_multiplier']
-        parameters = [p[1] for p in model.named_parameters() if p[0] != 'decoder.lagrangian_multiplier']
-
-        lagrangian_optimizer = RMSprop(lagrangian_parameter, lr=learning_rate) # TODO: Move this to other scope and use args.lr
-        optimizer = Adam(parameters, lr=learning_rate)
+        lagrangian_optimizer = RMSprop(lagrangian.parameters(), lr=learning_rate) # TODO: Move this to other scope and use args.lr
+        optimizer = Adam(model.parameters(), lr=learning_rate)
 
         ###
     else:
