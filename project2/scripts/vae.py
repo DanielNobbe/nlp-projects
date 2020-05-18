@@ -113,9 +113,12 @@ class SentenceVAE(nn.Module):
         unk_token_idx,
         word_dropout_probability=0.0,
         model_save_path='models',
+        freebits = None,
     ):
         super(SentenceVAE, self).__init__()
         self.model_save_path = model_save_path
+        Path(model_save_path).mkdir(parents = True, exist_ok = True)
+
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size, embedding_dim=embedding_size
         )
@@ -131,6 +134,7 @@ class SentenceVAE(nn.Module):
         self.decoded2vocab = nn.Linear(
             hidden_size, vocab_size
         )  # TODO should this be in the decoder
+        self.freebits = freebits
 
     def _embed_and_pack(self, input, lengths):
         embedded = self.embedding(input)
@@ -160,7 +164,7 @@ class SentenceVAE(nn.Module):
 
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
-        torch.save(mode.state_dict(), save_file_path)
+        torch.save(self.state_dict(), save_file_path)
 
     def load_from(self, save_file_path):
         self.load_state_dict(torch.load(save_file_path))
@@ -168,7 +172,7 @@ class SentenceVAE(nn.Module):
 
 
 
-def standard_vae_loss_terms(pred, target, ignore_index=0):
+def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0)):
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1)
 
@@ -188,10 +192,37 @@ def standard_vae_loss_terms(pred, target, ignore_index=0):
 
     return nll, kl
 
-
-def standard_vae_loss(pred, target, ignore_index=0):
-    nll, kl = loss_standar_vae_loss_terms(pred, target, ignore_index=ignore_index)
+def standard_vae_loss(pred, target, mean, std, ignore_index=0):
+    nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=ignore_index)
     loss = (nll + kl).mean()    # mean over batch
+    return loss
+
+
+def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5):
+    nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
+    nll = nll.sum(-1).mean() # First sum the nll over all dims, then average over batch
+
+    q = Normal(mean, std)
+    kl = kl_divergence(q, prior)
+    kl = kl.mean(0) # Average over batch. Keep dimensions intact
+
+    # If freebits is specified, the kl divergence along each dimension should be clamped to be higher than this value
+    # The distributions used here are simple normal distributions, with no off-diagonal variance terms.
+    # As such, the KL divergence is applied elementwise. 
+    kl = torch.clamp(kl, min = freebits)
+    kl = kl.sum(-1) # Sum kl over all dimensions
+
+    # elbo = log-likelihood - D_kl
+    # max elbo <-> min -elbo
+    # -elbo = -log-likelihood + D_kl
+    loss = (nll + kl)  
+
+    print(
+        "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
+            nll.item(), kl.item(), loss.item()
+        )
+    )
+
     return loss
 
 
@@ -206,8 +237,10 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
         target = by.to(device)  # target shape: (batch_size, seq_length)
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
-        # TODO ignore index is hardcoded here
-        loss = standard_vae_loss(pred, target, ignore_index=pad_index)
+        if model.freebits is None:
+            loss = standard_vae_loss(pred, target, ignore_index=padding_index, mean=mean, std=std)
+        elif model.freebits is not None: # Set up structure for when MDR is added
+            loss = freebits_vae_loss(pred, target, ignore_index = padding_index, prior = prior, mean=mean, std=std, freebits = model.freebits)
 
         optimizer.zero_grad()
         loss.backward()
@@ -256,9 +289,11 @@ def train(
     latent_size,
     word_dropout,
     print_every,
+    save_every,
     tensorboard_logging,
     logdir,
-    model_save_path
+    model_save_path,
+    freebits,
 ):
 
     train_data, val_data, test_data = get_datasets(data_path)
@@ -274,6 +309,7 @@ def train(
         num_layers=num_layers,
         word_dropout_probability=word_dropout,
         unk_token_idx=train_data.tokenizer.unk_token_id,
+        freebits = freebits, # Freebits value is the lambda value as described in Kingma et al. 
     )
     model.to(device)
 
@@ -286,10 +322,10 @@ def train(
     )
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
-
+    
     iterations = 0
     for epoch in range(num_epochs):
-        iterations = train_one_epoch(model, optimizer, train_loader, device, start_step=iterations, padding_index=padding_index)
+        iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, padding_index=padding_index, save_every=save_every)
         val_loss = evaluate(model, val_loader, device, padding_index=padding_index)
         print(f"Epoch {epoch} finished, validation loss: {val_loss}")
 
@@ -317,12 +353,17 @@ def parse_arguments(args=None):
     # parser.add_argument('-ed', '--embedding_dropout', type=float, default=0.5)
 
     parser.add_argument('-v','--print_every', type=int, default=50)
+    parser.add_argument('-vs', '--save_every', type=int, default=50000, help="Interval for saving model, in iterations.")
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
     parser.add_argument('-log','--logdir', type=str, default='logs')
     parser.add_argument('-m','--model_save_path', type=str, default='models')
+    parser.add_argument('-fb', '--freebits', type=float, default=None)
 
     args = parser.parse_args()
     return args
+
+    # Now, save state dict
+    
 
 
 if __name__ == "__main__":
