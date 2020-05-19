@@ -505,7 +505,7 @@ def parse_arguments(args=None):
     parser.add_argument('-sh', '--hidden_size', type=int, default=256)
     parser.add_argument('-sl', '--latent_size', type=int, default=16)
 
-    parser.add_argument('-wd', '--word_dropout', type=float, default=0.0)
+    parser.add_argument('-wd', '--word_dropout', type=float, default=1.0, help="Word dropout keep probability")
 
     # TODO should we use dropout aftere the embedding?
     # parser.add_argument('-ed', '--embedding_dropout', type=float, default=0.5)
