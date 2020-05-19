@@ -334,7 +334,6 @@ def train(
             best_val_loss = val_loss
             best_model = model.saved_model_files[-1]
             patience = 0
-            __import__('pdb').set_trace()
         else:
             patience += 1
             if patience >= early_stopping_patience:
