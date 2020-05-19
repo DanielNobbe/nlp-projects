@@ -188,6 +188,18 @@ class SentenceVAE(nn.Module):
 
         return out, mean, std
     
+    def sample_sentence(self, number):
+        
+        mean = torch.zeros(number)
+        std = torch.ones(number)
+        z = self.sampler(mean, std, 0) # Sample from standard Gaussian
+        packed = self._embed_and_pack(decoder_input, lengths)
+        decoded = self.decoder(z, packed)
+
+        unpacked, lengths = pad_packed_sequence(decoded, batch_first=True)
+        out = self.decoded2vocab(unpacked)
+
+        return out
 
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
