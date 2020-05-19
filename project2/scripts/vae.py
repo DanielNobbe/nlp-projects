@@ -510,7 +510,6 @@ def parse_arguments(args=None):
     # parser.add_argument('-ed', '--embedding_dropout', type=float, default=0.5)
 
     parser.add_argument('-v','--print_every', type=int, default=50)
-    parser.add_argument('-vs', '--save_every', type=int, default=50000, help="Interval for saving model, in iterations.")
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
     parser.add_argument('-log','--logdir', type=str, default='logs')
     parser.add_argument('-m','--model_save_path', type=str, default='models')
