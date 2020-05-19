@@ -180,8 +180,17 @@ class SentenceVAE(nn.Module):
     def load_from(self, save_file_path):
         self.load_state_dict(torch.load(save_file_path))
 
+def marginal_ll(model, mean, std):
+    # For a single datapoint:
+    K = 1 # Average over 1 sample per datapoint
+    
 
-
+def perplexity(nll):
+    # Not as simple as this. We need the marginal-log likelihood to compute the perplexity
+    # if torch.is_tensor(nll):
+    #     return torch.exp(nll.mean()).item()
+    # else:
+    #     return torch.exp(torch.Tensor([nll])).item()
 
 def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), print_loss=True):
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
@@ -196,8 +205,8 @@ def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Norma
     # -elbo = -log-likelihood + D_kl
     if print_loss:
         print(
-            "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
-                nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
+            "nll mean: {} \t kl mean: {} \t loss mean: {} {}".format(
+                nll.mean().item(), kl.mean().item(), (nll + kl).mean().item(), perplexity(nll)
             )
         )
 
