@@ -184,7 +184,7 @@ class SentenceVAE(nn.Module):
 
 
 def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), 
-    print_loss=True, loss_lists=[]):
+    print_loss=True, loss_lists=None):
 
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1)
@@ -202,19 +202,20 @@ def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Norma
                 nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
             )
         )
-        loss_lists[0].append(nll.mean().item()) # store NLL in list
-        loss_lists[1].append(kl.mean().item()) # store KL in list
+        if loss_lists is not None:
+            loss_lists[0].append(nll.mean().item()) # store NLL in list
+            loss_lists[1].append(kl.mean().item()) # store KL in list
 
     return nll, kl
 
-def standard_vae_loss(pred, target, mean, std, ignore_index=0, print_loss=True, loss_lists=[]):
+def standard_vae_loss(pred, target, mean, std, ignore_index=0, print_loss=True, loss_lists=None):
     nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=ignore_index, print_loss=print_loss, loss_lists=loss_lists)
     loss = (nll + kl).mean()    # mean over batch
     return loss
 
 
 def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5, 
-    print_loss=True, loss_lists=[]):
+    print_loss=True, loss_lists=None):
 
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1).mean() # First sum the nll over all dims, then average over batch
@@ -240,8 +241,9 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
                 nll.item(), kl.item(), loss.item()
             )
         )
-        loss_lists[0].append(nll.mean().item()) # store NLL in list
-        loss_lists[1].append(kl.mean().item()) # store KL in list
+        if loss_lists is not None:
+            loss_lists[0].append(nll.mean().item()) # store NLL in list
+            loss_lists[1].append(kl.mean().item()) # store KL in list
 
     return loss
 
@@ -332,7 +334,7 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
             # TODO Is this fixed now? What kind of values are we supposed to get here?
             # TODO ignore index is hardcoded here
             print_loss = (iteration % print_every == 0)
-            nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss)
+            nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss, loss_lists=None)
             loss = (nll + kl).sum()     # sum over batch
             total_loss += loss
             total_num += b
