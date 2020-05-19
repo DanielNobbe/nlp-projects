@@ -14,7 +14,7 @@ from torch.optim import Adam, RMSprop
 from torch.nn.functional import cross_entropy
 
 from data import padded_collate, get_datasets
-
+import pickle
 
 class Encoder(nn.Module):
     def __init__(self, embedding_size, hidden_size, latent_size, num_layers):
@@ -183,7 +183,9 @@ class SentenceVAE(nn.Module):
 
 
 
-def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), print_loss=True):
+def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), 
+    print_loss=True, loss_lists=[]):
+
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1)
 
@@ -200,16 +202,20 @@ def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Norma
                 nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
             )
         )
+        loss_lists[0].append(nll.mean().item()) # store NLL in list
+        loss_lists[1].append(kl.mean().item()) # store KL in list
 
     return nll, kl
 
-def standard_vae_loss(pred, target, mean, std, ignore_index=0, print_loss=True):
-    nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=ignore_index, print_loss=print_loss)
+def standard_vae_loss(pred, target, mean, std, ignore_index=0, print_loss=True, loss_lists=[]):
+    nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=ignore_index, print_loss=print_loss, loss_lists=loss_lists)
     loss = (nll + kl).mean()    # mean over batch
     return loss
 
 
-def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5, print_loss=True):
+def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5, 
+    print_loss=True, loss_lists=[]):
+
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1).mean() # First sum the nll over all dims, then average over batch
 
@@ -234,11 +240,13 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
                 nll.item(), kl.item(), loss.item()
             )
         )
+        loss_lists[0].append(nll.mean().item()) # store NLL in list
+        loss_lists[1].append(kl.mean().item()) # store KL in list
 
     return loss
 
 
-def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50):
+def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50, loss_lists = []):
     prior = Normal(0.0, 1.0)
     model.train()
     for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
@@ -252,9 +260,10 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         if model.freebits is None:
-            loss = standard_vae_loss(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss)
+            loss = standard_vae_loss(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss, loss_lists=loss_lists)
         elif model.freebits is not None: # Set up structure for when MDR is added
-            loss = freebits_vae_loss(pred, target, ignore_index = padding_index, prior = prior, mean=mean, std=std, freebits = model.freebits, print_loss=print_loss)
+            loss = freebits_vae_loss(pred, target, ignore_index = padding_index, prior = prior, mean=mean, std=std, 
+            freebits = model.freebits, print_loss=print_loss, loss_lists=loss_lists)
 
         optimizer.zero_grad()
         loss.backward()
@@ -269,7 +278,7 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
     return iteration
 
 def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimizer, data_loader, 
-                        device, save_every, iter_start, padding_index, minimum_rate=1.0, print_every=50):
+                        device, save_every, iter_start, padding_index, minimum_rate=1.0, print_every=50, loss_lists=None):
     prior = Normal(0.0, 1.0)
     model.train()
 
@@ -352,6 +361,8 @@ def train(
     model_save_path,
     freebits,
     MDR,
+    losses_save_path,
+    args=None,
 ):
 
     train_data, val_data, test_data = get_datasets(data_path)
@@ -390,14 +401,26 @@ def train(
     
     iterations = 0
     for epoch in range(num_epochs):
+
+        nll_list = []
+        kl_list = []
+        lists = (nll_list, kl_list)
+
         if MDR is None:
             iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
                                          padding_index=padding_index, save_every=save_every, print_every=print_every)
         else:
             iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
-                iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR)
+                iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR, loss_lists=lists)
         val_loss = evaluate(model, val_loader, device, padding_index=padding_index, print_every=print_every)
         print(f"Epoch {epoch} finished, validation loss: {val_loss}")
+    
+    losses_file_name = f"MDR{MDR}-freebits{freebits}-word_dropout{word_dropout}-print_every{print_every}-iterations{iterations}"
+    save_losses_path = Path(losses_save_path) / losses_file_name
+    with open(save_losses_path, 'wb') as file:
+        pickle.dump((lists, print_every, args), file)
+
+    
 
 
 def parse_arguments(args=None):
@@ -429,7 +452,7 @@ def parse_arguments(args=None):
     parser.add_argument('-m','--model_save_path', type=str, default='models')
     parser.add_argument('-fb', '--freebits', type=float, default=None)
     parser.add_argument('-mdr','--MDR', type=float, default=None, help='Enable MDR and specify minimum rate.')
-
+    parser.add_argument('-lp','--losses_save_path', type=str, default='models')
     args = parser.parse_args()
     return args
 
@@ -444,4 +467,4 @@ if __name__ == "__main__":
     args = parse_arguments()
     print(args)
     args = vars(args)
-    train(**args)
+    train(**args, args=args)
