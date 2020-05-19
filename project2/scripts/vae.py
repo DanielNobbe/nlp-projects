@@ -495,7 +495,7 @@ def parse_arguments(args=None):
 
     parser.add_argument('-ne', '--num_epochs', type=int, default=10)
     parser.add_argument('-sbt', '--batch_size_train', type=int, default=32)
-    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=128)
+    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=64)
 
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
 
