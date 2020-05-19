@@ -416,12 +416,13 @@ def train(
                 iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR, loss_lists=lists)
         val_loss = evaluate(model, val_loader, device, padding_index=padding_index, print_every=print_every)
         print(f"Epoch {epoch} finished, validation loss: {val_loss}")
+        
+        losses_file_name = f"MDR{MDR}-freebits{freebits}-word_dropout{word_dropout}-print_every{print_every}-iterations{iterations}"
+        save_losses_path = Path(losses_save_path) / losses_file_name
+        with open(save_losses_path, 'wb') as file:
+            print("Saving losses..")
+            pickle.dump((lists, print_every, args), file)
     
-    losses_file_name = f"MDR{MDR}-freebits{freebits}-word_dropout{word_dropout}-print_every{print_every}-iterations{iterations}"
-    save_losses_path = Path(losses_save_path) / losses_file_name
-    with open(save_losses_path, 'wb') as file:
-        print("Saving losses..")
-        pickle.dump((lists, print_every, args), file)
 
     
 
