@@ -408,6 +408,7 @@ def train(
         word_dropout_probability=word_dropout,
         unk_token_idx=train_data.tokenizer.unk_token_id,
         freebits = freebits, # Freebits value is the lambda value as described in Kingma et al. 
+        model_save_path=model_save_path
     )
     lagrangian = Lagrangian(MDR)
 
