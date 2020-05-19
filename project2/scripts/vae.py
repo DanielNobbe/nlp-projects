@@ -248,7 +248,7 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
     return loss
 
 
-def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50, loss_lists = []):
+def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50, loss_lists = None):
     prior = Normal(0.0, 1.0)
     model.train()
     for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
@@ -294,7 +294,7 @@ def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimiz
 
         print_loss = (iteration % print_every == 0)
 
-        nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss)
+        nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss, loss_lists=loss_lists)
         elbo = (nll + kl).mean() # This is the negative elbo, which should be minimized
         lagrangian_loss = lagrangian(kl)
 
@@ -410,7 +410,7 @@ def train(
 
         if MDR is None:
             iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
-                                         padding_index=padding_index, save_every=save_every, print_every=print_every)
+                                         padding_index=padding_index, save_every=save_every, print_every=print_every, loss_lists=lists)
         else:
             iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
                 iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR, loss_lists=lists)
