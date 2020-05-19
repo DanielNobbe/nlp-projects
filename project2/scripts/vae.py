@@ -388,7 +388,7 @@ def train(
     early_stopping_patience,
     freebits,
     MDR,
-    losses_save_path,
+    # losses_save_path,
     args=None,
 ):
 
@@ -473,7 +473,7 @@ def train(
         print("Current epoch training took {}".format(datetime.now()-epoch_start_time))
 
         losses_file_name = f"MDR{MDR}-freebits{freebits}-word_dropout{word_dropout}-print_every{print_every}-iterations{iterations}"
-        save_losses_path = Path(losses_save_path) / losses_file_name
+        save_losses_path = Path(model_save_path) / losses_file_name
         with open(save_losses_path, 'wb') as file:
             print("Saving losses..")
             pickle.dump((lists, print_every, args), file)
@@ -518,7 +518,7 @@ def parse_arguments(args=None):
     parser.add_argument('-es', '--early_stopping_patience', type=int, default=2)
     parser.add_argument('-fb', '--freebits', type=float, default=None)
     parser.add_argument('-mdr','--MDR', type=float, default=None, help='Enable MDR and specify minimum rate.')
-    parser.add_argument('-lp','--losses_save_path', type=str, default='models')
+    # parser.add_argument('-lp','--losses_save_path', type=str, default='models')
     args = parser.parse_args()
     return args
 
