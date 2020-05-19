@@ -139,6 +139,11 @@ class SentenceVAE(nn.Module):
             hidden_size, vocab_size
         )  # TODO should this be in the decoder
 
+        # This is a bit of a hack to track running means and standard deviations
+        self.tracked_means = nn.BatchNorm1d(num_features=latent_size, momentum=None)
+        self.tracked_stds = nn.BatchNorm1d(num_features=latent_size, momentum=None)
+
+
     def _embed_and_pack(self, input, lengths):
         embedded = self.embedding(input)
         packed = pack_padded_sequence(
@@ -163,21 +168,29 @@ class SentenceVAE(nn.Module):
         unpacked, lengths = pad_packed_sequence(decoded, batch_first=True)
 
         out = self.decoded2vocab(unpacked)
+
+        # Throw away the results of these modules,
+        # we only use them to track running averages
+        self.tracked_means(mean)
+        self.tracked_stds(std)
+
         return out, mean, std
 
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
         torch.save(self.state_dict(), save_file_path)
         self.saved_model_files.append(filename)
+        torch.save(self.tracked_means.state_dict(), save_file_path.with_suffix('.means'))
+        torch.save(self.tracked_stds.state_dict(), save_file_path.with_suffix('.stds'))
+        self.tracked_means.reset_running_stats()
+        self.tracked_stds.reset_running_stats()
 
     def load_from(self, save_file_path):
         self.load_state_dict(torch.load(save_file_path))
 
 
 
-
-def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0):
-    prior = Normal(0.0, 1.0)
+def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), print_loss=True):
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1)
 
