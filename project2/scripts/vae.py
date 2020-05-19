@@ -268,7 +268,8 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
 
     return iteration
 
-def train_one_epoch_MDR(model, lagrangian_optimizer, general_optimizer, data_loader, device, save_every, iter_start, padding_index, minimum_rate=1.0, print_every=50):
+def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimizer, data_loader, 
+                        device, save_every, iter_start, padding_index, minimum_rate=1.0, print_every=50):
     prior = Normal(0.0, 1.0)
     model.train()
 
@@ -376,11 +377,7 @@ def train(
     if MDR is not None:
         ### Define lagrangian parameter and optimizers
         lagrangian_optimizer = RMSprop(lagrangian.parameters(), lr=learning_rate) # TODO: Move this to other scope and use args.lr
-        optimizer = Adam(model.parameters(), lr=learning_rate)
-
-        ###
-    else:
-        optimizer = Adam(model.parameters(), lr=learning_rate)
+    optimizer = Adam(model.parameters(), lr=learning_rate)
 
 
     train_loader = DataLoader(
@@ -394,9 +391,10 @@ def train(
     iterations = 0
     for epoch in range(num_epochs):
         if MDR is None:
-            iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, padding_index=padding_index, save_every=save_every, print_every=print_every)
+            iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
+                                         padding_index=padding_index, save_every=save_every, print_every=print_every)
         else:
-            iterations = train_one_epoch_MDR(model, lagrangian_optimizer, optimizer, train_loader, device, 
+            iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
                 iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR)
         val_loss = evaluate(model, val_loader, device, padding_index=padding_index, print_every=print_every)
         print(f"Epoch {epoch} finished, validation loss: {val_loss}")
