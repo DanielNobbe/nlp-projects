@@ -104,6 +104,7 @@ class Decoder(nn.Module):
 
 class Lagrangian(nn.Module):
     def __init__(self, minimum_desired_rate):
+        super(Lagrangian, self).__init__()
         self.lagrangian_multiplier = torch.nn.Parameter(torch.tensor([1.01])) # TODO: Maybe this should be a vector?
         self.minimum_desired_rate = minimum_desired_rate
 
