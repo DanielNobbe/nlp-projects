@@ -420,6 +420,7 @@ def train(
     losses_file_name = f"MDR{MDR}-freebits{freebits}-word_dropout{word_dropout}-print_every{print_every}-iterations{iterations}"
     save_losses_path = Path(losses_save_path) / losses_file_name
     with open(save_losses_path, 'wb') as file:
+        print("Saving losses..")
         pickle.dump((lists, print_every, args), file)
 
     
