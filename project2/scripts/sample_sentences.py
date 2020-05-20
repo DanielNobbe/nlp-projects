@@ -1,9 +1,10 @@
-from vae import Encoder, Sampler, WordDropout, Decoder, Lagrangian, SentenceVAE
+from vae import Encoder, Sampler, WordDropout, Decoder, Lagrangian, SentenceVAE, evaluate
 
 from pathlib import Path
 
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 
 from data import padded_collate, get_datasets
 
@@ -48,8 +49,12 @@ def sample_sentence(model, tokenizer, number):
 def main():
 
     data_path = '../Data/Dataset'
-    train_data, _, _ = get_datasets(data_path)
+    train_data, val_data, test_data = get_datasets(data_path)
     tokenizer = train_data.tokenizer
+
+    test_loader = DataLoader(
+        val_data, batch_size=32, shuffle=False, collate_fn=padded_collate
+    )
 
     model = SentenceVAE(
         vocab_size=tokenizer.vocab_size,
@@ -62,7 +67,10 @@ def main():
         freebits = 0, # Freebits value is the lambda value as described in Kingma et al. 
     )
 
-    model_load_name = Path('MDRplusdropout_sentence_vae_MDR_5.0_4000.pt')
+    # model_load_name = Path('1vanilla.pt')
+    # model_load_name = Path('3word_dropout.pt')
+    # model_load_name = Path('5freebits_dropout.pt')
+    model_load_name = Path('6freebits_worddropout_mdr.pt')
     models_path = Path('models')
 
     model_load_path = models_path / model_load_name 
@@ -72,6 +80,10 @@ def main():
 
     sentence = sample_sentence(model, tokenizer, number=2)
     # print(sentences)
+
+    model.to(torch.device('cuda'))
+    test_loss = evaluate(model, test_loader, torch.device('cuda'), padding_index=0, print_every=50)
+    print("Test loss: ", test_loss)
 
 
 if __name__ == '__main__':
