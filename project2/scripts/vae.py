@@ -178,7 +178,8 @@ class SentenceVAE(nn.Module):
         decoded = self.decoder(z, packed)
 
         unpacked, lengths = pad_packed_sequence(decoded, batch_first=True)
-
+        # if not self.training:
+            # print("Max length: ", lengths.max())
         out = self.decoded2vocab(unpacked)
 
         # Throw away the results of these modules,
@@ -230,12 +231,12 @@ def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Norma
     # max elbo <-> min -elbo
     # -elbo = -log-likelihood + D_kl
 
-    if print_loss:
+    # if print_loss:
         # print(
-        tqdm.write(
-            "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
-                nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
-            )
+    tqdm.write(
+        "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
+            nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
+        )
         )
 
     if loss_lists is not None:
@@ -359,6 +360,8 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
     model.eval()
     total_loss = 0
     total_num = 0
+    total_nll = 0
+    total_kl = 0
     with torch.no_grad():
         for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
             logp, mean, std = model(bx.to(device), bl)
@@ -373,10 +376,13 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
             nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss, loss_lists=None)
             loss = (nll + kl).sum()     # sum over batch
             total_loss += loss
+            total_nll += nll.sum()
+            total_kl += kl.sum()
             total_num += b
-
+    val_nll = total_nll / total_num
+    val_kl = total_kl / total_num
     val_loss = total_loss / total_num
-
+    print("Test nll, kl :", val_nll, val_kl)
     return val_loss
 
 
@@ -452,12 +458,12 @@ def train(
             kl_list = []
             lists = (nll_list, kl_list)
 
-            if MDR is None:
-                iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
-                                            padding_index=padding_index, save_every=save_every, print_every=print_every, loss_lists=lists)
-            else:
-                iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
-                    iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR, loss_lists=lists)
+            # if MDR is None:
+            #     iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
+            #                                 padding_index=padding_index, save_every=save_every, print_every=print_every, loss_lists=lists)
+            # else:
+            #     iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
+            #         iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR, loss_lists=lists)
                 
         except KeyboardInterrupt:
             print("Manually stopped current epoch")
