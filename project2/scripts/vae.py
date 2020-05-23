@@ -15,6 +15,11 @@ from torch.nn.functional import cross_entropy
 
 from data import padded_collate, get_datasets
 
+from torch import logsumexp
+import numpy as np
+
+import pdb
+
 
 class Encoder(nn.Module):
     def __init__(self, embedding_size, hidden_size, latent_size, num_layers):
@@ -171,7 +176,7 @@ class SentenceVAE(nn.Module):
 
         out = self.decoded2vocab(unpacked)
         return out, mean, std
-    
+
 
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
@@ -180,17 +185,6 @@ class SentenceVAE(nn.Module):
     def load_from(self, save_file_path):
         self.load_state_dict(torch.load(save_file_path))
 
-def marginal_ll(model, mean, std):
-    # For a single datapoint:
-    K = 1 # Average over 1 sample per datapoint
-    
-
-def perplexity(nll):
-    # Not as simple as this. We need the marginal-log likelihood to compute the perplexity
-    # if torch.is_tensor(nll):
-    #     return torch.exp(nll.mean()).item()
-    # else:
-    #     return torch.exp(torch.Tensor([nll])).item()
 
 def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), print_loss=True):
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
@@ -205,8 +199,8 @@ def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Norma
     # -elbo = -log-likelihood + D_kl
     if print_loss:
         print(
-            "nll mean: {} \t kl mean: {} \t loss mean: {} {}".format(
-                nll.mean().item(), kl.mean().item(), (nll + kl).mean().item(), perplexity(nll)
+            "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
+                nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
             )
         )
 
@@ -228,14 +222,14 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
 
     # If freebits is specified, the kl divergence along each dimension should be clamped to be higher than this value
     # The distributions used here are simple normal distributions, with no off-diagonal variance terms.
-    # As such, the KL divergence is applied elementwise. 
+    # As such, the KL divergence is applied elementwise.
     kl = torch.clamp(kl, min = freebits)
     kl = kl.sum(-1) # Sum kl over all dimensions
 
     # elbo = log-likelihood - D_kl
     # max elbo <-> min -elbo
     # -elbo = -log-likelihood + D_kl
-    loss = (nll + kl)  
+    loss = (nll + kl)
 
     if print_loss:
         print(
@@ -245,6 +239,44 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
         )
 
     return loss
+
+def marginal_ll(model, input, target, lengths, mean, std, sample_size,
+                prior, batch_size, device, padding_index, debug = False):
+
+    qz_x_dist = Normal(mean, std)
+    argsums = torch.tensor((), dtype=torch.float64)
+    argsums = argsums.new_zeros((batch_size, 1), device = device)
+
+    for k in range(sample_size):
+        z_val = qz_x_dist.sample()
+        qz_x_logprobs = qz_x_dist.log_prob(z_val)
+        pz_logprobs = prior.log_prob(z_val)
+        decoder_input = model.word_dropout(input)
+        packed = model._embed_and_pack(decoder_input, lengths)
+        decoded = model.decoder(z_val, packed)
+        unpacked, lengths = pad_packed_sequence(decoded, batch_first = True)
+        pred = model.decoded2vocab(unpacked)
+        pred = pred.transpose(1, 2).to(device)  # pred shape: (batch_size, vocab_size, seq_length)
+        target = target.to(device)
+        nll = cross_entropy(pred, target, ignore_index = padding_index, reduction = "none")
+        logpx_z = -nll.sum(-1).reshape(batch_size, 1)
+        logqz_x = torch.sum(qz_x_logprobs, axis = -1).reshape(batch_size, 1)
+        logpz = torch.sum(pz_logprobs, axis = -1).reshape(batch_size, 1)
+        argsum = logpx_z + logpz - logqz_x
+        argsums += argsum
+
+    logpx_batch = -np.log(sample_size) + argsums #logsumexp(argsums, dim = 1, keepdims = True) #TODO: Do we even need logsumexp here?
+
+    return logpx_batch.to(device)
+
+def perplexity(mll, batch_seq_lengths, batch_size):
+
+    exponent = -torch.sum(mll) / np.sum(batch_seq_lengths)
+    batch_ppl = torch.exp(exponent)
+
+    return batch_ppl
+
+
 
 
 def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50):
@@ -275,9 +307,10 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
             else:
                 model.save_model(f"sentence_vae_{iteration}.pt")
 
+
     return iteration
 
-def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimizer, data_loader, 
+def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimizer, data_loader,
                         device, save_every, iter_start, padding_index, minimum_rate=1.0, print_every=50):
     prior = Normal(0.0, 1.0)
     model.train()
@@ -313,7 +346,9 @@ def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimiz
 
         if (iteration % save_every) == 0:
             model.save_model(f"sentence_vae_MDR_{minimum_rate}_{iteration}.pt")
-        
+
+
+
     return iteration
 
 
@@ -337,9 +372,17 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
             total_loss += loss
             total_num += b
 
+            mll = marginal_ll(model = model, input = bx.to(device), target = target,
+                            lengths = bl, mean = mean, std = std, sample_size = 10,
+                            prior = Normal(0.0, 1.0), batch_size = b, device = device,
+                            padding_index = padding_index)
+
+            ppl = perplexity(mll = mll, batch_seq_lengths = bl, batch_size = b)
+
+
     val_loss = total_loss / total_num
 
-    return val_loss
+    return val_loss, ppl
 
 
 def train(
@@ -376,7 +419,7 @@ def train(
         num_layers=num_layers,
         word_dropout_probability=word_dropout,
         unk_token_idx=train_data.tokenizer.unk_token_id,
-        freebits = freebits, # Freebits value is the lambda value as described in Kingma et al. 
+        freebits = freebits, # Freebits value is the lambda value as described in Kingma et al.
     )
     lagrangian = Lagrangian(MDR)
 
@@ -396,17 +439,17 @@ def train(
     val_loader = DataLoader(
         val_data, batch_size=batch_size_valid, shuffle=False, collate_fn=padded_collate
     )
-    
+
     iterations = 0
     for epoch in range(num_epochs):
         if MDR is None:
-            iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
+            iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations,
                                          padding_index=padding_index, save_every=save_every, print_every=print_every)
         else:
-            iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
+            iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device,
                 iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR)
-        val_loss = evaluate(model, val_loader, device, padding_index=padding_index, print_every=print_every)
-        print(f"Epoch {epoch} finished, validation loss: {val_loss}")
+        val_loss, ppl = evaluate(model, val_loader, device, padding_index=padding_index, print_every=print_every)
+        print(f"Epoch {epoch} finished, validation loss: {val_loss} || Perplexity: {ppl}")
 
 
 def parse_arguments(args=None):
@@ -443,10 +486,10 @@ def parse_arguments(args=None):
     return args
 
     # Now, save state dict
-    
+
 
     # Now, save state dict
-    
+
 
 
 if __name__ == "__main__":
