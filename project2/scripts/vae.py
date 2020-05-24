@@ -212,7 +212,7 @@ class SentenceVAE(nn.Module):
         self.tracked_stds.reset_running_stats()
 
     def load_from(self, save_file_path):
-        self.load_state_dict(torch.load(save_file_path))
+        self.load_state_dict(torch.load(save_file_path, map_location=torch.device('cpu')))
 
 
 
@@ -458,12 +458,12 @@ def train(
             kl_list = []
             lists = (nll_list, kl_list)
 
-            # if MDR is None:
-            #     iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
-            #                                 padding_index=padding_index, save_every=save_every, print_every=print_every, loss_lists=lists)
-            # else:
-            #     iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
-            #         iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR, loss_lists=lists)
+            if MDR is None:
+                iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
+                                            padding_index=padding_index, save_every=save_every, print_every=print_every, loss_lists=lists)
+            else:
+                iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
+                    iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR, loss_lists=lists)
                 
         except KeyboardInterrupt:
             print("Manually stopped current epoch")
