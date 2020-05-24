@@ -68,11 +68,12 @@ class WordDropout(nn.Module):
 
     def forward(self, padded_sentences):
         x = padded_sentences.clone()
-        dropout_mask = (
-            torch.rand_like(padded_sentences, dtype=torch.float32)
-            >= self.dropout_probability
-        )
-        x[dropout_mask] = self.unk_token_idx
+        if self.training:
+            dropout_mask = (
+                torch.rand_like(padded_sentences, dtype=torch.float32)
+                >= self.dropout_probability
+            )
+            x[dropout_mask] = self.unk_token_idx
         return x
 
 
