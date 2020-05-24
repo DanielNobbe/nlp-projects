@@ -1,5 +1,8 @@
 import argparse
 from pathlib import Path
+from datetime import datetime
+
+import numpy as np
 
 import torch
 from torch import nn
@@ -13,12 +16,15 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.optim import Adam, RMSprop
 from torch.nn.functional import cross_entropy
 
-from data import padded_collate, get_datasets
+from tqdm import tqdm
 
 from torch import logsumexp
 import numpy as np
 
 import pdb
+
+from data import padded_collate, get_datasets
+import pickle
 
 
 class Encoder(nn.Module):
@@ -132,8 +138,8 @@ class SentenceVAE(nn.Module):
     ):
         super(SentenceVAE, self).__init__()
         self.model_save_path = model_save_path
-        Path(model_save_path).mkdir(parents = True, exist_ok = True)
-
+        self.saved_model_files = []
+        Path(self.model_save_path).mkdir(exist_ok=True, parents=True)
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size, embedding_dim=embedding_size
         )
@@ -150,6 +156,11 @@ class SentenceVAE(nn.Module):
             hidden_size, vocab_size
         )  # TODO should this be in the decoder
         self.freebits = freebits
+
+        # This is a bit of a hack to track running means and standard deviations
+        self.tracked_means = nn.BatchNorm1d(num_features=latent_size, momentum=None)
+        self.tracked_stds = nn.BatchNorm1d(num_features=latent_size, momentum=None)
+
 
     def _embed_and_pack(self, input, lengths):
         embedded = self.embedding(input)
@@ -175,18 +186,33 @@ class SentenceVAE(nn.Module):
         unpacked, lengths = pad_packed_sequence(decoded, batch_first=True)
 
         out = self.decoded2vocab(unpacked)
+
+        # Throw away the results of these modules,
+        # we only use them to track running averages
+        self.tracked_means(mean)
+        self.tracked_stds(std)
+
         return out, mean, std
 
 
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
         torch.save(self.state_dict(), save_file_path)
+        self.saved_model_files.append(filename)
+        torch.save(self.tracked_means.state_dict(), save_file_path.with_suffix('.means'))
+        torch.save(self.tracked_stds.state_dict(), save_file_path.with_suffix('.stds'))
+        self.tracked_means.reset_running_stats()
+        self.tracked_stds.reset_running_stats()
 
     def load_from(self, save_file_path):
         self.load_state_dict(torch.load(save_file_path))
 
 
-def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), print_loss=True):
+
+
+def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), 
+    print_loss=True, loss_lists=None):
+
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1)
 
@@ -197,22 +223,30 @@ def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Norma
     # elbo = log-likelihood - D_kl
     # max elbo <-> min -elbo
     # -elbo = -log-likelihood + D_kl
+
     if print_loss:
-        print(
+        # print(
+        tqdm.write(
             "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
                 nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
             )
         )
 
+    if loss_lists is not None:
+        loss_lists[0].append(nll.mean().item()) # store NLL in list
+        loss_lists[1].append(kl.mean().item()) # store KL in list
+
     return nll, kl
 
-def standard_vae_loss(pred, target, mean, std, ignore_index=0, print_loss=True):
-    nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=ignore_index, print_loss=print_loss)
+def standard_vae_loss(pred, target, mean, std, ignore_index=0, print_loss=True, loss_lists=None):
+    nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=ignore_index, print_loss=print_loss, loss_lists=loss_lists)
     loss = (nll + kl).mean()    # mean over batch
     return loss
 
 
-def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5, print_loss=True):
+def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0, 1.0), freebits=0.5, 
+    print_loss=True, loss_lists=None):
+
     nll = cross_entropy(pred, target, ignore_index=ignore_index, reduction="none")
     nll = nll.sum(-1).mean() # First sum the nll over all dims, then average over batch
 
@@ -237,6 +271,9 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
                 nll.item(), kl.item(), loss.item()
             )
         )
+    if loss_lists is not None:
+        loss_lists[0].append(nll.mean().item()) # store NLL in list
+        loss_lists[1].append(kl.mean().item()) # store KL in list
 
     return loss
 
@@ -279,10 +316,10 @@ def perplexity(mll, batch_seq_lengths, batch_size):
 
 
 
-def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50):
+def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50, loss_lists = None):
     prior = Normal(0.0, 1.0)
     model.train()
-    for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
+    for iteration, (bx, by, bl) in enumerate(tqdm(data_loader), start=iter_start):
         logp, mean, std = model(bx.to(device), bl)
 
         b, l, c = logp.shape
@@ -293,9 +330,10 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
 
         # TODO Is this fixed now? What kind of values are we supposed to get here?
         if model.freebits is None:
-            loss = standard_vae_loss(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss)
+            loss = standard_vae_loss(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss, loss_lists=loss_lists)
         elif model.freebits is not None: # Set up structure for when MDR is added
-            loss = freebits_vae_loss(pred, target, ignore_index = padding_index, prior = prior, mean=mean, std=std, freebits = model.freebits, print_loss=print_loss)
+            loss = freebits_vae_loss(pred, target, ignore_index = padding_index, prior = prior, mean=mean, std=std, 
+            freebits = model.freebits, print_loss=print_loss, loss_lists=loss_lists)
 
         optimizer.zero_grad()
         loss.backward()
@@ -310,8 +348,11 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
 
     return iteration
 
-def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimizer, data_loader,
-                        device, save_every, iter_start, padding_index, minimum_rate=1.0, print_every=50):
+
+
+def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimizer, data_loader, 
+                        device, save_every, iter_start, padding_index, minimum_rate=1.0, print_every=50, loss_lists=None):
+
     prior = Normal(0.0, 1.0)
     model.train()
 
@@ -325,7 +366,7 @@ def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimiz
 
         print_loss = (iteration % print_every == 0)
 
-        nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss)
+        nll, kl = standard_vae_loss_terms(pred, target, ignore_index=padding_index, mean=mean, std=std, print_loss=print_loss, loss_lists=loss_lists)
         elbo = (nll + kl).mean() # This is the negative elbo, which should be minimized
         lagrangian_loss = lagrangian(kl)
 
@@ -357,7 +398,7 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
     total_loss = 0
     total_num = 0
     with torch.no_grad():
-        for iteration, (bx, by, bl) in enumerate(data_loader):
+        for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
             logp, mean, std = model(bx.to(device), bl)
 
             b, l, c = logp.shape
@@ -367,7 +408,7 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
             # TODO Is this fixed now? What kind of values are we supposed to get here?
             # TODO ignore index is hardcoded here
             print_loss = (iteration % print_every == 0)
-            nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss)
+            nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss, loss_lists=None)
             loss = (nll + kl).sum()     # sum over batch
             total_loss += loss
             total_num += b
@@ -402,9 +443,14 @@ def train(
     tensorboard_logging,
     logdir,
     model_save_path,
+    early_stopping_patience,
     freebits,
     MDR,
+    # losses_save_path,
+    args=None,
 ):
+
+    start_time = datetime.now()
 
     train_data, val_data, test_data = get_datasets(data_path)
     device = torch.device(device)
@@ -419,7 +465,8 @@ def train(
         num_layers=num_layers,
         word_dropout_probability=word_dropout,
         unk_token_idx=train_data.tokenizer.unk_token_id,
-        freebits = freebits, # Freebits value is the lambda value as described in Kingma et al.
+        freebits = freebits, # Freebits value is the lambda value as described in Kingma et al. 
+        model_save_path=model_save_path
     )
     lagrangian = Lagrangian(MDR)
 
@@ -441,15 +488,61 @@ def train(
     )
 
     iterations = 0
+    patience = 0
+    best_val_loss = torch.tensor(np.inf, device=device)
+    best_model = None
     for epoch in range(num_epochs):
-        if MDR is None:
-            iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations,
-                                         padding_index=padding_index, save_every=save_every, print_every=print_every)
-        else:
-            iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device,
-                iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR)
+
+        epoch_start_time = datetime.now()
+        try:
+            nll_list = []
+            kl_list = []
+            lists = (nll_list, kl_list)
+
+            if MDR is None:
+                iterations = train_one_epoch(model, optimizer, train_loader, device, iter_start=iterations, 
+                                            padding_index=padding_index, save_every=save_every, print_every=print_every, loss_lists=lists)
+            else:
+                iterations = train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, optimizer, train_loader, device, 
+                    iter_start=iterations, padding_index=padding_index, save_every=save_every, minimum_rate=MDR, loss_lists=lists)
+                
+        except KeyboardInterrupt:
+            print("Manually stopped current epoch")
+            __import__('pdb').set_trace()
+
+        print("Training this epoch took {}".format(datetime.now() - epoch_start_time))
+
+        print("Validation phase:")
         val_loss, ppl = evaluate(model, val_loader, device, padding_index=padding_index, print_every=print_every)
-        print(f"Epoch {epoch} finished, validation loss: {val_loss} || Perplexity: {ppl}")
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model = model.saved_model_files[-1]
+            patience = 0
+        else:
+            patience += 1
+            if patience >= early_stopping_patience:
+                print("EARLY STOPPING")
+                break
+
+
+        print(f"###############################################################")
+        print(f"Epoch {epoch} finished, validation loss: {val_loss}, ppl: {ppl}")
+        print(f"###############################################################")
+        print("Current epoch training took {}".format(datetime.now()-epoch_start_time))
+
+        losses_file_name = f"MDR{MDR}-freebits{freebits}-word_dropout{word_dropout}-print_every{print_every}-iterations{iterations}"
+        save_losses_path = Path(model_save_path) / losses_file_name
+        with open(save_losses_path, 'wb') as file:
+            print("Saving losses..")
+            pickle.dump((lists, print_every, args), file)
+
+
+    print("Training took {}".format(datetime.now() - start_time))
+    print(f"Best validation loss: {best_val_loss}")
+    print(f"Best model: {best_model}")
+        
+   
 
 
 def parse_arguments(args=None):
@@ -460,7 +553,7 @@ def parse_arguments(args=None):
 
     parser.add_argument('-ne', '--num_epochs', type=int, default=10)
     parser.add_argument('-sbt', '--batch_size_train', type=int, default=32)
-    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=256)
+    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=64)
 
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
 
@@ -475,13 +568,14 @@ def parse_arguments(args=None):
     # parser.add_argument('-ed', '--embedding_dropout', type=float, default=0.5)
 
     parser.add_argument('-v','--print_every', type=int, default=50)
-    parser.add_argument('-vs', '--save_every', type=int, default=50000, help="Interval for saving model, in iterations.")
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
     parser.add_argument('-log','--logdir', type=str, default='logs')
     parser.add_argument('-m','--model_save_path', type=str, default='models')
+    parser.add_argument('-si','--save_every', type=int, default=1000)
+    parser.add_argument('-es', '--early_stopping_patience', type=int, default=2)
     parser.add_argument('-fb', '--freebits', type=float, default=None)
     parser.add_argument('-mdr','--MDR', type=float, default=None, help='Enable MDR and specify minimum rate.')
-
+    # parser.add_argument('-lp','--losses_save_path', type=str, default='models')
     args = parser.parse_args()
     return args
 
@@ -496,4 +590,4 @@ if __name__ == "__main__":
     args = parse_arguments()
     print(args)
     args = vars(args)
-    train(**args)
+    train(**args, args=args)
