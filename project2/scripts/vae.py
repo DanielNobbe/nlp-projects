@@ -38,6 +38,7 @@ class Encoder(nn.Module):
         num_directions = 2  # bidiractional
         self.h2m = nn.Linear(hidden_size * num_layers * num_directions, latent_size)
         self.h2v = nn.Linear(hidden_size * num_layers * num_directions, latent_size)
+        self.softplus = nn.Softplus()
 
     def forward(self, input):
         encoder_output, hn = self.rnn(input)
@@ -45,7 +46,8 @@ class Encoder(nn.Module):
         hn = hn.transpose(0, 1).reshape(batch_size, -1)
         mean = self.h2m(hn)
         logvar = self.h2v(hn)
-        std = torch.exp(logvar / 2)  # TODO Understand this magic
+        # std = torch.exp(logvar / 2)
+        std = self.softplus(logvar)
         return mean, std
 
 
