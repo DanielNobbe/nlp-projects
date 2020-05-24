@@ -52,6 +52,8 @@ def main():
     train_data, val_data, test_data = get_datasets(data_path)
     tokenizer = train_data.tokenizer
 
+    print("Lengths: ", len(train_data), len(val_data), len(test_data))
+
     test_loader = DataLoader(
         val_data, batch_size=32, shuffle=False, collate_fn=padded_collate
     )
@@ -61,8 +63,8 @@ def main():
         embedding_size=300,
         hidden_size=256,
         latent_size=16,
-        num_layers=1,
-        word_dropout_probability=0.0,
+        num_layers=2, #1,
+        word_dropout_probability=1.0,
         unk_token_idx=tokenizer.unk_token_id,
         freebits = 0, # Freebits value is the lambda value as described in Kingma et al. 
     )
@@ -70,7 +72,9 @@ def main():
     # model_load_name = Path('1vanilla.pt')
     # model_load_name = Path('3word_dropout.pt')
     # model_load_name = Path('5freebits_dropout.pt')
-    model_load_name = Path('6freebits_worddropout_mdr.pt')
+    # model_load_name = Path('6freebits_worddropout_mdr.pt')
+    model_load_name = Path('A.pt')
+
     models_path = Path('models')
 
     model_load_path = models_path / model_load_name 
@@ -81,8 +85,8 @@ def main():
     sentence = sample_sentence(model, tokenizer, number=2)
     # print(sentences)
 
-    model.to(torch.device('cuda'))
-    test_loss = evaluate(model, test_loader, torch.device('cuda'), padding_index=0, print_every=50)
+    # model.to(torch.device('cuda'))
+    test_loss = evaluate(model, test_loader, torch.device('cpu'), padding_index=0, print_every=50)
     print("Test loss: ", test_loss)
 
 
