@@ -558,7 +558,6 @@ def approximate_nll(model, data_loader, device, num_samples, padding_index):
 def test_nll_estimation(
         data_path,
         device,
-        vocab_size,
         embedding_size,
         hidden_size,
         latent_size,
@@ -610,6 +609,7 @@ def test_nll_estimation(
     print(loss)
 
     print("Testing took {}".format(datetime.now() - start_time))
+    return loss
 
 
 if __name__ == "__main__":
