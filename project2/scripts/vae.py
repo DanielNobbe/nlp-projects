@@ -16,7 +16,7 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.optim import Adam, RMSprop
 from torch.nn.functional import cross_entropy
 
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 from data import padded_collate, get_datasets
 import pickle
@@ -531,7 +531,7 @@ def parse_arguments(args=None):
     # Now, save state dict
     
 
-def approximate_nll(model, data_loader, device, num_samples, padding_index):
+def approximate_nll(model, data_loader, device, num_samples, padding_index, print_every=1):
     model.eval()
     total_loss = 0
     total_num = 0
@@ -539,7 +539,7 @@ def approximate_nll(model, data_loader, device, num_samples, padding_index):
         for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
             target = by.to(device)  # target shape: (batch_size, seq_length)
             # This is not the most efficient way to do this :(
-            for sample in range(num_samples):
+            for sample in trange(num_samples):
                 logp, mean, std = model(bx.to(device), bl)
                 b, l, c = logp.shape
                 pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
@@ -565,8 +565,8 @@ def test_nll_estimation(
         word_dropout,
         freebits,
         model_save_path,
-        saved_model_file,
         batch_size_valid,
+        saved_model_file,
         num_samples,
         **kwargs):
 
@@ -611,6 +611,11 @@ def test_nll_estimation(
     print("Testing took {}".format(datetime.now() - start_time))
     return loss
 
+def test():
+    args = parse_arguments()
+    saved_model_file = "./results_final/results2/vanilla/models/sentence_vae_3500.pt"
+    num_samples = 10
+    test_nll_estimation(saved_model_file=saved_model_file, num_samples=num_samples, **args)
 
 if __name__ == "__main__":
     args = parse_arguments()
