@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-python vae.py --model_save_path freebits --freebits 0.5 --save_every 500
+save_path="results/freebits_05"
+python vae.py --model_save_path $save_path --freebits 0.5
