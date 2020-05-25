@@ -421,7 +421,7 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
                             prior = Normal(0.0, 1.0), batch_size = b, device = device,
                             padding_index = padding_index)
 
-            ppl = perplexity(mll = mll, batch_seq_lengths = bl, batch_size = b)
+            ppl = perplexity(msdadadadll = mll, batch_seq_lengths = bl, batch_size = b)
 
 
     val_loss = total_loss / total_num
@@ -673,7 +673,7 @@ def test_nll_estimation(
 
     epoch_start_time = datetime.now()
     try:
-        loss, kl = approximate_nll(model=model, data_loader=test_loader, device=device, padding_index=padding_index, num_samples=num_samples)
+        loss, kl, ppl = approximate_nll(model=model, data_loader=test_loader, device=device, padding_index=padding_index, num_samples=num_samples)
 
 
     except KeyboardInterrupt:
@@ -688,7 +688,7 @@ def test_nll_estimation(
     print(kl)
 
     print("Testing took {}".format(datetime.now() - start_time))
-    return loss, kl
+    return loss, kl, ppl
 
 def test():
     args = parse_arguments()
