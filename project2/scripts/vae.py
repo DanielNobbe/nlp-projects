@@ -284,14 +284,14 @@ def marginal_ll(model, input, target, lengths, mean, std, sample_size,
                 prior, batch_size, device, padding_index, debug = False):
 
     qz_x_dist = Normal(mean, std)
-    argsums = torch.tensor((), dtype=torch.float64)
-    argsums = argsums.new_zeros((batch_size, 1), device = device)
+    argsums = torch.zeros((batch_size, 1), device=device)
 
     for k in range(sample_size):
         z_val = qz_x_dist.sample()
         qz_x_logprobs = qz_x_dist.log_prob(z_val)
         pz_logprobs = prior.log_prob(z_val)
-        decoder_input = model.word_dropout(input)
+        # decoder_input = model.word_dropout(input)
+        decoder_input = input
         packed = model._embed_and_pack(decoder_input, lengths)
         decoded = model.decoder(z_val, packed)
         unpacked, lengths = pad_packed_sequence(decoded, batch_first = True)
@@ -592,13 +592,15 @@ def approximate_nll(model, data_loader, device, num_samples, padding_index, prin
     model.eval()
     total_loss = 0
     total_kl_loss = 0
+    total_ppl = 0
     total_num = 0
     with torch.no_grad():
         for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
+            input = bx.to(device)
             target = by.to(device)  # target shape: (batch_size, seq_length)
             # This is not the most efficient way to do this :(
             for sample in trange(num_samples):
-                logp, mean, std = model(bx.to(device), bl)
+                logp, mean, std = model(input, bl)
                 b, l, c = logp.shape
                 pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
 
@@ -613,10 +615,19 @@ def approximate_nll(model, data_loader, device, num_samples, padding_index, prin
 
                 total_num += b
 
+            mll = marginal_ll(model=model, input=input, target=target,
+                            lengths = bl, mean = mean, std = std, sample_size = num_samples,
+                            prior = Normal(0.0, 1.0), batch_size = b, device = device,
+                            padding_index = padding_index)
+
+            ppl = perplexity(mll = mll, batch_seq_lengths = bl, batch_size = b)
+            total_ppl += ppl
+
     approx_nll = total_loss / total_num
     approx_kl = total_kl_loss / total_num
+    approx_ppl = total_ppl / total_num
     
-    return approx_nll, approx_kl
+    return approx_nll, approx_kl, approx_ppl
 
 
 def test_nll_estimation(
@@ -663,6 +674,7 @@ def test_nll_estimation(
     epoch_start_time = datetime.now()
     try:
         loss, kl = approximate_nll(model=model, data_loader=test_loader, device=device, padding_index=padding_index, num_samples=num_samples)
+
 
     except KeyboardInterrupt:
         print("Manually stopped current epoch")
