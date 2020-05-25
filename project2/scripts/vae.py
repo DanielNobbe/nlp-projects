@@ -517,7 +517,7 @@ def parse_arguments(args=None):
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
     parser.add_argument('-log','--logdir', type=str, default='logs')
     parser.add_argument('-m','--model_save_path', type=str, default='models')
-    parser.add_argument('-si','--save_every', type=int, default=1000)
+    parser.add_argument('-si','--save_every', type=int, default=500)
     parser.add_argument('-es', '--early_stopping_patience', type=int, default=2)
     parser.add_argument('-fb', '--freebits', type=float, default=None)
     parser.add_argument('-mdr','--MDR', type=float, default=None, help='Enable MDR and specify minimum rate.')
