@@ -534,6 +534,7 @@ def parse_arguments(args=None):
 def approximate_nll(model, data_loader, device, num_samples, padding_index, print_every=1):
     model.eval()
     total_loss = 0
+    total_kl_loss = 0
     total_num = 0
     with torch.no_grad():
         for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
@@ -546,13 +547,19 @@ def approximate_nll(model, data_loader, device, num_samples, padding_index, prin
 
                 print_loss = (iteration % print_every == 0)
                 nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss, loss_lists=None)
+
                 loss = nll.sum()     # sum over batch
                 total_loss += loss
+
+                kl_loss = kl.sum()
+                total_kl_loss += kl_loss
+
                 total_num += b
 
-    val_loss = total_loss / total_num
-
-    return val_loss
+    approx_nll = total_loss / total_num
+    approx_kl = total_kl_loss / total_num
+    
+    return approx_loss, approx_kl
 
 
 def test_nll_estimation(
@@ -598,7 +605,7 @@ def test_nll_estimation(
 
     epoch_start_time = datetime.now()
     try:
-        loss = approximate_nll(model=model, data_loader=test_loader, device=device, padding_index=padding_index, num_samples=num_samples)
+        loss, kl = approximate_nll(model=model, data_loader=test_loader, device=device, padding_index=padding_index, num_samples=num_samples)
 
     except KeyboardInterrupt:
         print("Manually stopped current epoch")
@@ -608,8 +615,11 @@ def test_nll_estimation(
     print("Approximate NLL:")
     print(loss)
 
+    print("Approximate KL:")
+    print(kl)
+
     print("Testing took {}".format(datetime.now() - start_time))
-    return loss
+    return loss, kl
 
 def test():
     args = parse_arguments()
