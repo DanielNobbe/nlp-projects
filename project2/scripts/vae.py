@@ -559,7 +559,7 @@ def approximate_nll(model, data_loader, device, num_samples, padding_index, prin
     approx_nll = total_loss / total_num
     approx_kl = total_kl_loss / total_num
     
-    return approx_loss, approx_kl
+    return approx_nll, approx_kl
 
 
 def test_nll_estimation(
