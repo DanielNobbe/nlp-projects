@@ -531,6 +531,86 @@ def parse_arguments(args=None):
     # Now, save state dict
     
 
+def approximate_nll(model, data_loader, device, num_samples, padding_index):
+    model.eval()
+    total_loss = 0
+    total_num = 0
+    with torch.no_grad():
+        for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
+            target = by.to(device)  # target shape: (batch_size, seq_length)
+            # This is not the most efficient way to do this :(
+            for sample in range(num_samples):
+                logp, mean, std = model(bx.to(device), bl)
+                b, l, c = logp.shape
+                pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+
+                print_loss = (iteration % print_every == 0)
+                nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss, loss_lists=None)
+                loss = nll.sum()     # sum over batch
+                total_loss += loss
+                total_num += b
+
+    val_loss = total_loss / total_num
+
+    return val_loss
+
+
+def test_nll_estimation(
+        data_path,
+        device,
+        vocab_size,
+        embedding_size,
+        hidden_size,
+        latent_size,
+        num_layers,
+        word_dropout,
+        freebits,
+        model_save_path,
+        saved_model_file,
+        batch_size_valid,
+        num_samples,
+        **kwargs):
+
+    start_time = datetime.now()
+
+    train_data, val_data, test_data = get_datasets(data_path)
+    device = torch.device(device)
+    vocab_size = train_data.tokenizer.vocab_size
+    padding_index = train_data.tokenizer.pad_token_id
+
+    model = SentenceVAE(
+        vocab_size=vocab_size,
+        embedding_size=embedding_size,
+        hidden_size=hidden_size,
+        latent_size=latent_size,
+        num_layers=num_layers,
+        word_dropout_probability=word_dropout,
+        unk_token_idx=train_data.tokenizer.unk_token_id,
+        freebits = freebits, # Freebits value is the lambda value as described in Kingma et al. 
+        model_save_path=model_save_path
+    )
+
+    model.load_from(saved_model_file)
+    model.to(device)
+
+    test_loader = DataLoader(
+        test_data, batch_size=batch_size_valid, shuffle=False, collate_fn=padded_collate
+    )
+
+    epoch_start_time = datetime.now()
+    try:
+        loss = approximate_nll(model=model, data_loader=test_loader, device=device, padding_index=padding_index, num_samples=num_samples)
+
+    except KeyboardInterrupt:
+        print("Manually stopped current epoch")
+        __import__('pdb').set_trace()
+
+
+    print("Approximate NLL:")
+    print(loss)
+
+    print("Testing took {}".format(datetime.now() - start_time))
+
 
 if __name__ == "__main__":
     args = parse_arguments()
