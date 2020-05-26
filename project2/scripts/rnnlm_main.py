@@ -36,6 +36,9 @@ def evaluate(data_loader, dataset, device, model):
         last_hidden = model.init_hidden((batch_mod_diff))
         adapt_last_batch = True
 
+    average_length = 0
+    average_number = 0
+
     with torch.no_grad():
         for batch, (source_batch, target_batch, lengths) in enumerate(data_loader, 0):
 
@@ -44,24 +47,32 @@ def evaluate(data_loader, dataset, device, model):
             if len(lengths) != args.eval_batch_size:
                 hidden = last_hidden
 
-
-            output, hidden = model(source_batch.to(device), hidden.to(device), lengths)
+            mean_length_in_batch = 0
+            for length in lengths:
+                print("Length: ", length)
+                mean_length_in_batch += length
+            mean_length_in_batch /= len(lengths)
+            average_length += mean_length_in_batch
+            average_number += 1
+            # output, hidden = model(source_batch.to(device), hidden.to(device), lengths)
 
             # hidden = repackage_hidden(hidden)
 
-            batches, seq_length, vocab_size = output.shape
+            # batches, seq_length, vocab_size = output.shape
 
-            output = output.transpose(1, 2) # transpose output because cross_entropy expected the number of classes as second dim.
+            # output = output.transpose(1, 2) # transpose output because cross_entropy expected the number of classes as second dim.
 
-            target = target_batch.to(device)
+            # target = target_batch.to(device)
 
-            nll = cross_entropy(output, target, ignore_index = data_loader.dataset.tokenizer.pad_token_id)
+            # nll = cross_entropy(output, target, ignore_index = data_loader.dataset.tokenizer.pad_token_id, reduction='None')
 
-            loss = nll
+            # loss = nll
 
-            total_loss += loss.item()
-
-        return total_loss /  len(data_loader)
+            # total_loss += loss.item()
+    average = average_length/average_number
+    print("Average length in eval set: ", average)
+    return 
+        # total_loss /  len(data_loader)
 
 
 def train(model, train_data, train_loader, args, device, optimizer, epoch):
@@ -159,30 +170,30 @@ def main(args):
     best_val_loss = None
 
     # Use Ctrl + C to break out of training at any time
-    try:
-        for epoch in range(1, args.epochs + 1):
+    # try:
+    #     for epoch in range(1, args.epochs + 1):
 
-            epoch_start_time = time.time()
+    #         epoch_start_time = time.time()
 
-            train(model, train_data, train_loader, args, device, optimizer, epoch)
+    #         train(model, train_data, train_loader, args, device, optimizer, epoch)
 
-            val_loss = evaluate(val_loader, val_data, device, model)
+    #         val_loss = evaluate(val_loader, val_data, device, model)
 
-            print('-' * 89)
+    #         print('-' * 89)
 
-            print('| End of epoch {:3d} | Time: {:5.2f} | Validation loss: {:5.2f} |'.format(epoch,
-             (time.time() - epoch_start_time), val_loss))
+    #         print('| End of epoch {:3d} | Time: {:5.2f} | Validation loss: {:5.2f} |'.format(epoch,
+    #          (time.time() - epoch_start_time), val_loss))
 
-            print('-' * 89)
+    #         print('-' * 89)
 
-            if not best_val_loss or val_loss < best_val_loss:
-                with open(args.save, 'wb') as f:
-                    torch.save(model, f)
+    #         if not best_val_loss or val_loss < best_val_loss:
+    #             with open(args.save, 'wb') as f:
+    #                 torch.save(model, f)
 
-                best_val_loss = val_loss
-    except KeyboardInterrupt:
-        print('-' * 89)
-        print('Terminating training early.')
+    #             best_val_loss = val_loss
+    # except KeyboardInterrupt:
+    #     print('-' * 89)
+    #     print('Terminating training early.')
 
 
 

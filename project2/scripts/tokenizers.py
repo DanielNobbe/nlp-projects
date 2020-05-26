@@ -62,7 +62,8 @@ class WordTokenizer:
             str: decoded sentence.
         """
         if isinstance(x, torch.Tensor):
-            x = x.cpu().numpy()
+            x = [x.detach().cpu().numpy().tolist()]
+
         decoded = [self.i2w[i] for i in x]
         if skip_special_tokens:
             decoded = [t for t in decoded if t not in self.remove_in_decode]

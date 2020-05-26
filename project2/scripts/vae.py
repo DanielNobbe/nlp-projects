@@ -207,7 +207,19 @@ class SentenceVAE(nn.Module):
         self.tracked_stds(std)
 
         return out, mean, std
+    
+    def sample_sentence(self, number):
+        
+        mean = torch.zeros(number)
+        std = torch.ones(number)
+        z = self.sampler(mean, std, 0) # Sample from standard Gaussian
+        packed = self._embed_and_pack(decoder_input, lengths)
+        decoded = self.decoder(z, packed)
 
+        unpacked, lengths = pad_packed_sequence(decoded, batch_first=True)
+        out = self.decoded2vocab(unpacked)
+
+        return out
 
     def save_model(self, filename):
         save_file_path = Path(self.model_save_path) / filename
@@ -219,7 +231,7 @@ class SentenceVAE(nn.Module):
         self.tracked_stds.reset_running_stats()
 
     def load_from(self, save_file_path):
-        self.load_state_dict(torch.load(save_file_path))
+        self.load_state_dict(torch.load(save_file_path, map_location=torch.device('cpu')))
 
 
 
@@ -238,12 +250,12 @@ def standard_vae_loss_terms(pred, target, mean, std, ignore_index=0, prior=Norma
     # max elbo <-> min -elbo
     # -elbo = -log-likelihood + D_kl
 
-    if print_loss:
+    # if print_loss:
         # print(
-        tqdm.write(
-            "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
-                nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
-            )
+    tqdm.write(
+        "nll mean: {} \t kl mean: {} \t loss mean: {}".format(
+            nll.mean().item(), kl.mean().item(), (nll + kl).mean().item()
+        )
         )
 
     if loss_lists is not None:
@@ -463,6 +475,8 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
     model.eval()
     total_loss = 0
     total_num = 0
+    total_nll = 0
+    total_kl = 0
     with torch.no_grad():
         for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
             logp, mean, std = model(bx.to(device), bl)
@@ -477,6 +491,8 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
             nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss, loss_lists=None)
             loss = (nll + kl).sum()     # sum over batch
             total_loss += loss
+            total_nll += nll.sum()
+            total_kl += kl.sum()
             total_num += b
 
             mll = marginal_ll(model = model, input = bx.to(device), target = target.to(device),
@@ -486,6 +502,9 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
 
             ppl = perplexity_old(mll = mll, batch_seq_lengths = bl, batch_size = b)
 
+    val_nll = total_nll / total_num
+    val_kl = total_kl / total_num
+    print("Test nll, kl :", val_nll, val_kl)
 
     val_loss = total_loss / total_num
 
