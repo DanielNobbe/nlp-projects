@@ -125,7 +125,7 @@ def main(args):
         print('Device: {}'.format(device))
 
     # Prerequisites for training
-    train_data, val_data, test_data, small_data = get_datasets()
+    train_data, val_data, test_data = get_datasets()
 
     # Build model
     vocab_size = train_data.tokenizer.vocab_size
@@ -146,25 +146,6 @@ def main(args):
         test_data, batch_size = args.eval_batch_size, shuffle = False,
         collate_fn = padded_collate, num_workers = 1
     )
-
-    # TODO: remove before submission
-    small_loader = DataLoader(
-        small_data, batch_size = args.batch_size, shuffle = True,
-        collate_fn = padded_collate, num_workers = 1
-    )
-    # Uncomment for quick testing/debugging
-    print('Small loader')
-    print(len(small_loader))
-
-    print('Small data')
-    print(len(small_data))
-
-    train_data = small_data
-    val_data = small_data
-    test_data = small_data
-    train_loader = small_loader
-    val_loader = small_loader
-    test_loader = small_loader
 
     # Till here
 
@@ -219,8 +200,7 @@ def main(args):
     print('=' * 89)
 
 
-if __name__ == "__main__":
-
+def parse_arguments():
     parser = argparse.ArgumentParser(description = 'Main training script for RNN LM.')
     parser.add_argument('--model', type = str, default = 'GRU',
                         help = 'type of recurrent net (LSTM, GRU)')
@@ -251,5 +231,10 @@ if __name__ == "__main__":
 
 
     args = parser.parse_args()
+
+    return args
+
+if __name__ == "__main__":
+    args = parse_arguments()
 
     main(args)
