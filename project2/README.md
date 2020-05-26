@@ -56,7 +56,7 @@ https://drive.google.com/drive/folders/1w03VOOmbA_QX583KKhHoMaJwEGObWxeD?usp=sha
 
 ## Results
 
-See the included ```results.ipynb``` 
+See the included ```scripts/results.ipynb``` notebook.
 
 ## Additional parameters:
 Additional parameters can be specified for the vae.py script. To see all of these you can run:
