@@ -10,7 +10,8 @@ pip install -r requirements.txt
 
 
 ## Training
-To get our results, run the scripts in the `experiment_scripts` folder:
+
+To get our results, first navigate to the `scripts` folder and then run the scripts in the `experiment_scripts` folder:
 
 *Simple RNN model without VAE:*
 ```
