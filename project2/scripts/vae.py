@@ -381,6 +381,9 @@ def perplexity_old(mll, batch_seq_lengths, batch_size):
 def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_start, padding_index, print_every=50, loss_lists = None):
     prior = Normal(0.0, 1.0)
     model.train()
+
+    print("\nTraining for an epoch\n")
+
     for iteration, (bx, by, bl) in enumerate(tqdm(data_loader), start=iter_start):
         logp, mean, std = model(bx.to(device), bl)
 
@@ -418,6 +421,7 @@ def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimiz
     prior = Normal(0.0, 1.0)
     model.train()
 
+    print("\nTraining one epoch:\n")
 
     for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
         logp, mean, std = model(bx.to(device), bl)
@@ -503,7 +507,6 @@ def train(
     print_every,
     save_every,
     tensorboard_logging,
-    logdir,
     model_save_path,
     early_stopping_patience,
     freebits,
@@ -610,41 +613,35 @@ def train(
 def parse_arguments(args=None):
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--data_path', type=str, default='../Data/Dataset')
-    parser.add_argument('-d', '--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', choices=['cuda', 'cpu'])
+    parser.add_argument('--data_path', type=str, default='../Data/Dataset', help="Folder for the Penn Treebank dataset. This folder should contain the 3 files of the provided data: train, val and test. Default: ../Data/Dataset")
+    parser.add_argument('-d', '--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', choices=['cuda', 'cpu'], help="The device to use (either cpu or cuda). Default: gpu")
 
-    parser.add_argument('-ne', '--num_epochs', type=int, default=10)
-    parser.add_argument('-sbt', '--batch_size_train', type=int, default=32)
-    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=64)
+    parser.add_argument('-ne', '--num_epochs', type=int, default=10, help="Maximum number of epochs to train for. Default: 10")
+    parser.add_argument('-sbt', '--batch_size_train', type=int, default=32, help="Batch size to use for training. Default: 32")
+    parser.add_argument('-sbv', '--batch_size_valid', type=int, default=64, help="Batch size to use for validation. Default: 64")
 
-    parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
+    parser.add_argument('-lr', '--learning_rate', type=float, default=0.001, help="Learning rate for the optimizer. Default: 0.001")
 
-    parser.add_argument('-nl', '--num_layers', type=int, default=1)
-    parser.add_argument('-se', '--embedding_size', type=int, default=300)
-    parser.add_argument('-sh', '--hidden_size', type=int, default=256)
-    parser.add_argument('-sl', '--latent_size', type=int, default=16)
+    parser.add_argument('-nl', '--num_layers', type=int, default=1, help="Number of layers for the recurrent models. Default: 1")
+    parser.add_argument('-se', '--embedding_size', type=int, default=300, help="Embedding size. Default: 300")
+    parser.add_argument('-sh', '--hidden_size', type=int, default=256, help="Hidden size. Default: 256")
+    parser.add_argument('-sl', '--latent_size', type=int, default=16, help="Latent size. Default: 16")
 
-    parser.add_argument('-wd', '--word_dropout', type=float, default=1.0, help="Word dropout keep probability")
+    parser.add_argument('-wd', '--word_dropout', type=float, default=1.0, help="Word dropout keep probability. Default: 1.0 (keep every word)")
 
     # TODO should we use dropout aftere the embedding?
     # parser.add_argument('-ed', '--embedding_dropout', type=float, default=0.5)
 
-    parser.add_argument('-v','--print_every', type=int, default=50)
+    parser.add_argument('-v','--print_every', type=int, default=50, help="Status printing interval. Default: 50")
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
-    parser.add_argument('-log','--logdir', type=str, default='logs')
-    parser.add_argument('-m','--model_save_path', type=str, default='models')
-    parser.add_argument('-si','--save_every', type=int, default=500)
-    parser.add_argument('-es', '--early_stopping_patience', type=int, default=2)
-    parser.add_argument('-fb', '--freebits', type=float, default=None)
-    parser.add_argument('-mdr','--MDR', type=float, default=None, help='Enable MDR and specify minimum rate.')
-    # parser.add_argument('-lp','--losses_save_path', type=str, default='models')
+    parser.add_argument('-m','--model_save_path', type=str, default='models', help="Folder to save the pretrained models to. If doesn't exist, it is created. Default: models")
+    parser.add_argument('-si','--save_every', type=int, default=500, help="Checkpointing interval in iterations. Default: 500")
+    parser.add_argument('-es', '--early_stopping_patience', type=int, default=2, help="Early stopping patience. Default: 2")
+    parser.add_argument('-fb', '--freebits', type=float, default=None, help="Free Bits parameter (if not provided, free bits method is not used for training)")
+    parser.add_argument('-mdr','--MDR', type=float, default=None, help='MDR minimum rate (if not provided, MDR won\'t be used for training)')
     args = parser.parse_args()
     return args
 
-    # Now, save state dict
-
-
-    # Now, save state dict
 
 
 def approximate_nll(model, data_loader, device, num_samples, padding_index, print_every=1):
@@ -755,7 +752,6 @@ def test():
     test_nll_estimation(saved_model_file=saved_model_file, num_samples=num_samples, **args)
 
 if __name__ == "__main__":
-    test()
     args = parse_arguments()
     print(args)
     args = vars(args)
