@@ -62,7 +62,7 @@ class Sampler(nn.Module):
         super(Sampler, self).__init__()
         self.latent_size = latent_size  # TODO not used
 
-    def forward(self, mean, std, batch_size):
+    def forward(self, mean, std):
         m = Normal(mean, std)
         sample = m.rsample()
         return sample
@@ -172,15 +172,16 @@ class SentenceVAE(nn.Module):
         )
         return packed
 
-    def forward(self, input, lengths):
+
+    def encode(self, input, lengths):
         batch_size = input.size(0)
 
         packed = self._embed_and_pack(input, lengths)
-
         mean, std = self.encoder(packed)
+        return mean, std
 
-        z = self.sampler(mean, std, batch_size)
 
+    def decode(self, input, z, lengths):
         decoder_input = self.word_dropout(input)
         packed = self._embed_and_pack(decoder_input, lengths)
 
@@ -188,7 +189,17 @@ class SentenceVAE(nn.Module):
 
         unpacked, lengths = pad_packed_sequence(decoded, batch_first=True)
 
-        out = self.decoded2vocab(unpacked)
+        out = self.decoded2vocab(unpacked)  # shape: (batch_size, seq_length, vocab_size)
+        out = out.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+        return out
+
+
+    def forward(self, input, lengths):
+        mean, std = self.encode(input, lengths)
+
+        z = self.sampler(mean, std)
+
+        out = self.decode(input, z, lengths)
 
         # Throw away the results of these modules,
         # we only use them to track running averages
@@ -325,8 +336,8 @@ def train_one_epoch(model, optimizer, data_loader, device, save_every, iter_star
     for iteration, (bx, by, bl) in enumerate(tqdm(data_loader), start=iter_start):
         logp, mean, std = model(bx.to(device), bl)
 
-        b, l, c = logp.shape
-        pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+        b, c, l = logp.shape
+        pred = logp     # pred shape: (batch_size, vocab_size, seq_length)
         target = by.to(device)  # target shape: (batch_size, seq_length)
 
         print_loss = (iteration % print_every == 0)
@@ -363,8 +374,8 @@ def train_one_epoch_MDR(model, lagrangian, lagrangian_optimizer, general_optimiz
     for iteration, (bx, by, bl) in enumerate(data_loader, start=iter_start):
         logp, mean, std = model(bx.to(device), bl)
 
-        b, l, c = logp.shape
-        pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+        b, c, l = logp.shape
+        pred = logp  # pred shape: (batch_size, vocab_size, seq_length)
         target = by.to(device)  # target shape: (batch_size, seq_length)
 
         print_loss = (iteration % print_every == 0)
@@ -404,8 +415,8 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
         for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
             logp, mean, std = model(bx.to(device), bl)
 
-            b, l, c = logp.shape
-            pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+            b, c, l = logp.shape
+            pred = logp  # pred shape: (batch_size, vocab_size, seq_length)
             target = by.to(device)  # target shape: (batch_size, seq_length)
 
             # TODO Is this fixed now? What kind of values are we supposed to get here?
@@ -592,17 +603,22 @@ def approximate_nll(model, data_loader, device, num_samples, padding_index, prin
     model.eval()
     total_loss = 0
     total_kl_loss = 0
-    total_ppl = 0
     total_num = 0
     with torch.no_grad():
         for iteration, (bx, by, bl) in enumerate(tqdm(data_loader)):
             input = bx.to(device)
             target = by.to(device)  # target shape: (batch_size, seq_length)
+
+            mean, std = model.encode(input, bl)
+
             # This is not the most efficient way to do this :(
+
+            # NLL and KL
             for sample in trange(num_samples):
-                logp, mean, std = model(input, bl)
-                b, l, c = logp.shape
-                pred = logp.transpose(1, 2)  # pred shape: (batch_size, vocab_size, seq_length)
+                z = model.sampler(mean, std)
+                logp = model.decode(input, z, bl)
+                b, c, l = logp.shape
+                pred = logp  # pred shape: (batch_size, vocab_size, seq_length)
 
                 print_loss = (iteration % print_every == 0)
                 nll, kl = standard_vae_loss_terms(pred, target, mean, std, ignore_index=padding_index, print_loss=print_loss, loss_lists=None)
