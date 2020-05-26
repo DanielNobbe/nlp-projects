@@ -49,6 +49,9 @@ To get our results, run the scripts in the `experiment_scripts` folder:
 
 The results of these experiments are written to their corresponding folder (see the content of the scripts)
 
+## Pretrained models and other checkpoints (used in the results notebook)
+
+https://drive.google.com/drive/folders/1w03VOOmbA_QX583KKhHoMaJwEGObWxeD?usp=sharing
 
 ## Results
 
