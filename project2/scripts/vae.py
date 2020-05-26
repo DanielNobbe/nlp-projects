@@ -334,7 +334,7 @@ def perplexity(model, data_loader, device, num_samples):
 
     ppl = torch.exp(-total_log_marginal / total_num_tokens)
 
-    return sample_marginal, total_tokens
+    return ppl
 
 
 
