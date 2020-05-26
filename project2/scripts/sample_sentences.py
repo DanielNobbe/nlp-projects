@@ -13,7 +13,7 @@ def sample_sentence(model, tokenizer, number):
     
     mean = torch.zeros(model.sampler.latent_size)
     std = torch.ones(model.sampler.latent_size)
-    z = model.sampler(mean, std, 0) # Sample from standard Gaussian
+    z = model.sampler(mean, std) # Sample from standard Gaussian
     # z = std
     # packed = model._embed_and_pack(z, lengths)
     
@@ -63,7 +63,7 @@ def main():
         embedding_size=300,
         hidden_size=256,
         latent_size=16,
-        num_layers=2, #1,
+        num_layers=1, #1,
         word_dropout_probability=1.0,
         unk_token_idx=tokenizer.unk_token_id,
         freebits = 0, # Freebits value is the lambda value as described in Kingma et al. 
