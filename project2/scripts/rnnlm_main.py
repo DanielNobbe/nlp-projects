@@ -169,7 +169,7 @@ def main(args):
     # store best validation loss
     best_val_loss = None
 
-    Use Ctrl + C to break out of training at any time
+    # Use Ctrl + C to break out of training at any time
     try:
         for epoch in range(1, args.epochs + 1):
 
