@@ -169,31 +169,31 @@ def main(args):
     # store best validation loss
     best_val_loss = None
 
-    # Use Ctrl + C to break out of training at any time
-    # try:
-    #     for epoch in range(1, args.epochs + 1):
+    Use Ctrl + C to break out of training at any time
+    try:
+        for epoch in range(1, args.epochs + 1):
 
-    #         epoch_start_time = time.time()
+            epoch_start_time = time.time()
 
-    #         train(model, train_data, train_loader, args, device, optimizer, epoch)
+            train(model, train_data, train_loader, args, device, optimizer, epoch)
 
-    #         val_loss = evaluate(val_loader, val_data, device, model)
+            val_loss = evaluate(val_loader, val_data, device, model)
 
-    #         print('-' * 89)
+            print('-' * 89)
 
-    #         print('| End of epoch {:3d} | Time: {:5.2f} | Validation loss: {:5.2f} |'.format(epoch,
-    #          (time.time() - epoch_start_time), val_loss))
+            print('| End of epoch {:3d} | Time: {:5.2f} | Validation loss: {:5.2f} |'.format(epoch,
+             (time.time() - epoch_start_time), val_loss))
 
-    #         print('-' * 89)
+            print('-' * 89)
 
-    #         if not best_val_loss or val_loss < best_val_loss:
-    #             with open(args.save, 'wb') as f:
-    #                 torch.save(model, f)
+            if not best_val_loss or val_loss < best_val_loss:
+                with open(args.save, 'wb') as f:
+                    torch.save(model, f)
 
-    #             best_val_loss = val_loss
-    # except KeyboardInterrupt:
-    #     print('-' * 89)
-    #     print('Terminating training early.')
+                best_val_loss = val_loss
+    except KeyboardInterrupt:
+        print('-' * 89)
+        print('Terminating training early.')
 
 
 
