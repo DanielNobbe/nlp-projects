@@ -179,7 +179,7 @@ class SentenceVAE(nn.Module):
         packed = self._embed_and_pack(input, lengths)
         mean, std = self.encoder(packed)
         return mean, std
-
+        
 
     def decode(self, input, z, lengths):
         decoder_input = self.word_dropout(input)
@@ -291,6 +291,53 @@ def freebits_vae_loss(pred, target, mean, std, ignore_index=0, prior=Normal(0.0,
 
     return loss
 
+
+@torch.no_grad()
+def perplexity(model, data_loader, device, num_samples):
+    model.eval()
+    prior = Normal(0.0, 1.0)
+    padding_index = data_loader.dataset.tokenizer.pad_token_id
+    sample_marginal = 0
+    total_num_tokens = 0
+    total_log_marginal = 0
+
+    for bx, by, bl in tqdm(data_loader):
+        samples = []
+        num_tokens = sum(bl)
+        input = bx.to(device)
+        target = by.to(device)  # target shape: (batch_size, seq_length)
+        batch_size = input.size(0)
+
+        mean, std = model.encode(input, bl)
+        q = Normal(mean, std)
+
+        for k in trange(num_samples):
+            z = q.sample()
+            log_qz_x = q.log_prob(z).sum(-1)
+            log_pz = prior.log_prob(z).sum(-1)
+
+            logits = model.decode(input, z, bl)
+            nll = cross_entropy(logits, target, ignore_index=padding_index, reduction="none")
+            log_px_z = -nll.sum(-1)     # log p(x|z)
+            log_pxz = log_px_z + log_pz     # log p(x, z) = log p(x|z) + log p(z)
+
+            log_pxz_over_qz_x = (log_pxz - log_qz_x)     # log [p(x, z) / q(z|x)]
+
+            samples.append(log_pxz_over_qz_x)
+
+        samples = torch.stack(samples)
+        K = torch.tensor(float(num_samples), device=device)
+        log_marginal = torch.logsumexp(samples, dim=0) - torch.log(K)
+
+        total_log_marginal += log_marginal.sum()
+        total_num_tokens += num_tokens
+
+    ppl = torch.exp(-total_log_marginal / total_num_tokens)
+
+    return sample_marginal, total_tokens
+
+
+
 def marginal_ll(model, input, target, lengths, mean, std, sample_size,
                 prior, batch_size, device, padding_index, debug = False):
 
@@ -305,9 +352,10 @@ def marginal_ll(model, input, target, lengths, mean, std, sample_size,
         decoder_input = input
         packed = model._embed_and_pack(decoder_input, lengths)
         decoded = model.decoder(z_val, packed)
+
         unpacked, lengths = pad_packed_sequence(decoded, batch_first = True)
         pred = model.decoded2vocab(unpacked)
-        pred = pred.transpose(1, 2).to(device)  # pred shape: (batch_size, vocab_size, seq_length)
+        pred = pred.to(device)  # pred shape: (batch_size, vocab_size, seq_length)
         target = target.to(device)
         nll = cross_entropy(pred, target, ignore_index = padding_index, reduction = "none")
         logpx_z = -nll.sum(-1).reshape(batch_size, 1)
@@ -320,7 +368,7 @@ def marginal_ll(model, input, target, lengths, mean, std, sample_size,
 
     return logpx_batch.to(device)
 
-def perplexity(mll, batch_seq_lengths, batch_size):
+def perplexity_old(mll, batch_seq_lengths, batch_size):
 
     exponent = -torch.sum(mll) / np.sum(batch_seq_lengths)
     batch_ppl = torch.exp(exponent)
@@ -427,12 +475,12 @@ def evaluate(model, data_loader, device, padding_index, print_every=50):
             total_loss += loss
             total_num += b
 
-            mll = marginal_ll(model = model, input = bx.to(device), target = target,
+            mll = marginal_ll(model = model, input = bx.to(device), target = target.to(device),
                             lengths = bl, mean = mean, std = std, sample_size = 10,
                             prior = Normal(0.0, 1.0), batch_size = b, device = device,
                             padding_index = padding_index)
 
-            ppl = perplexity(msdadadadll = mll, batch_seq_lengths = bl, batch_size = b)
+            ppl = perplexity_old(mll = mll, batch_seq_lengths = bl, batch_size = b)
 
 
     val_loss = total_loss / total_num
@@ -631,18 +679,11 @@ def approximate_nll(model, data_loader, device, num_samples, padding_index, prin
 
                 total_num += b
 
-            mll = marginal_ll(model=model, input=input, target=target,
-                            lengths = bl, mean = mean, std = std, sample_size = num_samples,
-                            prior = Normal(0.0, 1.0), batch_size = b, device = device,
-                            padding_index = padding_index)
-
-            ppl = perplexity(mll = mll, batch_seq_lengths = bl, batch_size = b)
-            total_ppl += ppl
 
     approx_nll = total_loss / total_num
     approx_kl = total_kl_loss / total_num
-    approx_ppl = total_ppl / total_num
-    
+    approx_ppl = None
+
     return approx_nll, approx_kl, approx_ppl
 
 
@@ -689,7 +730,8 @@ def test_nll_estimation(
 
     epoch_start_time = datetime.now()
     try:
-        loss, kl, ppl = approximate_nll(model=model, data_loader=test_loader, device=device, padding_index=padding_index, num_samples=num_samples)
+        ppl = perplexity(model, data_loader=test_loader, device=device, num_samples=num_samples)
+        loss, kl, _ = approximate_nll(model=model, data_loader=test_loader, device=device, padding_index=padding_index, num_samples=num_samples)
 
 
     except KeyboardInterrupt:
@@ -707,12 +749,13 @@ def test_nll_estimation(
     return loss, kl, ppl
 
 def test():
-    args = parse_arguments()
+    args = vars(parse_arguments())
     saved_model_file = "./results_final/results2/vanilla/models/sentence_vae_3500.pt"
-    num_samples = 10
+    num_samples = 2
     test_nll_estimation(saved_model_file=saved_model_file, num_samples=num_samples, **args)
 
 if __name__ == "__main__":
+    test()
     args = parse_arguments()
     print(args)
     args = vars(args)
